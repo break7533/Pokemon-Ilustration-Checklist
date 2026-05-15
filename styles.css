@@ -190,6 +190,17 @@ button { cursor: pointer; background: none; border: none; font: inherit; color: 
   .sep { display: none; }
 }
 
+/* AUTH BUTTON */
+.auth-btn {
+  width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-full); border: 1.5px solid var(--color-border);
+  background: var(--color-surface-offset); color: var(--color-text-muted);
+  transition: all var(--transition); flex-shrink: 0; padding: 0; overflow: hidden;
+}
+.auth-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.auth-btn.signed-in { border-color: var(--color-obtained); padding: 0; }
+.auth-btn.signed-in:hover { border-color: var(--color-primary); opacity: 0.8; }
+
 /* BACK LINK */
 .back-link {
   display: flex; align-items: center; justify-content: center;

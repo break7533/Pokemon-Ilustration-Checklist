@@ -45,7 +45,17 @@ function toggleObtained(cardId) {
   else obtained[cardId] = true;
   saveState();
   render();
+  if (typeof window.syncObtainedToCloud === 'function') {
+    window.syncObtainedToCloud(PAGE_ID, obtained);
+  }
 }
+
+// Called by firebase.js after login to merge cloud state
+window.applyCloudState = function(cloudData) {
+  obtained = Object.assign({}, cloudData);
+  saveState();
+  render();
+};
 
 function getFilteredSorted() {
   let list = CARDS.slice();
