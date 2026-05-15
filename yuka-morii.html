@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yuka Morii Card Checklist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <a href="index.html" class="back-link" aria-label="Back to home">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </a>
+    <div class="logo">
+      <svg class="logo-icon" viewBox="0 0 36 36" fill="none" aria-label="Pokéball">
+        <circle cx="18" cy="18" r="17" stroke="currentColor" stroke-width="2"/>
+        <path d="M1 18h34" stroke="currentColor" stroke-width="2"/>
+        <circle cx="18" cy="18" r="5" fill="currentColor"/>
+        <circle cx="18" cy="18" r="3" fill="var(--color-surface-2)"/>
+        <path d="M1 18C1 9.163 8.163 2 17 2" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round"/>
+        <path d="M35 18C35 26.837 27.837 34 19 34" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <div class="logo-text">Yuka Morii<br><span>Checklist</span></div>
+    </div>
+    <div class="controls">
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="search" class="search-input" id="searchInput" placeholder="Search Pokémon or set…" aria-label="Search">
+      </div>
+
+      <div class="control-row">
+        <span class="ctrl-label">Show</span>
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="missing">Missing</button>
+        <button class="filter-btn" data-filter="obtained">Obtained</button>
+      </div>
+
+      <div class="sep" aria-hidden="true"></div>
+
+      <div class="control-row">
+        <span class="ctrl-label">Sort</span>
+        <button class="sort-btn active" data-sort="name" title="Sort A→Z / Z→A">
+          <span>Name</span><span class="arrow" id="arrow-name">↑</span>
+        </button>
+        <button class="sort-btn" data-sort="date" title="Sort oldest/newest">
+          <span>Year</span><span class="arrow" id="arrow-date">↑</span>
+        </button>
+      </div>
+
+      <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat-pill"><span class="stat-dot total"></span><span id="statTotal">0 total</span></div>
+  <div class="stat-pill"><span class="stat-dot obtained"></span><span id="statObtained">0 obtained</span></div>
+  <div class="stat-pill"><span class="stat-dot missing"></span><span id="statMissing">0 missing</span></div>
+  <div class="progress-bar-wrap" role="progressbar" aria-label="Collection progress">
+    <div class="progress-bar" id="progressBar" style="width:0%"></div>
+  </div>
+  <span class="progress-text" id="progressText">0%</span>
+</div>
+
+<main class="grid-wrap">
+  <div class="card-grid" id="cardGrid" role="list" aria-label="Yuka Morii cards"></div>
+</main>
+
+<script src="cards/yuka-morii.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
