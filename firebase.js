@@ -21,17 +21,25 @@ let currentUser = null;
 // Exposed for app.js to call after toggleObtained
 window.syncObtainedToCloud = async function(pageId, obtained) {
   if (!currentUser) return;
-  const ref = doc(db, 'users', currentUser.uid);
-  await setDoc(ref, { [pageId]: obtained }, { merge: true });
+  try {
+    const ref = doc(db, 'users', currentUser.uid);
+    await setDoc(ref, { [pageId]: obtained }, { mergeFields: [pageId] });
+  } catch (e) {
+    console.warn('Firestore write failed (ad blocker?), data saved locally only.', e.message);
+  }
 };
 
 // Load this page's obtained state from Firestore
 async function loadFromCloud(pageId) {
   if (!currentUser) return null;
-  const ref = doc(db, 'users', currentUser.uid);
-  const snap = await getDoc(ref);
-  if (snap.exists() && snap.data()[pageId]) {
-    return snap.data()[pageId];
+  try {
+    const ref = doc(db, 'users', currentUser.uid);
+    const snap = await getDoc(ref);
+    if (snap.exists() && snap.data()[pageId]) {
+      return snap.data()[pageId];
+    }
+  } catch (e) {
+    console.warn('Firestore read failed (ad blocker?), using local data.', e.message);
   }
   return null;
 };

@@ -15,11 +15,11 @@ let searchQuery = '';
 try {
   const saved = localStorage.getItem(LS_OBTAINED);
   if (saved) {
-    obtained = JSON.parse(saved);
+    Object.assign(obtained, JSON.parse(saved));
   } else if (PAGE_ID === 'yuka-morii') {
     // Migrate from old key format
     const legacy = localStorage.getItem('yukaMoriiObtained');
-    if (legacy) { obtained = JSON.parse(legacy); localStorage.setItem(LS_OBTAINED, legacy); }
+    if (legacy) { Object.assign(obtained, JSON.parse(legacy)); localStorage.setItem(LS_OBTAINED, legacy); }
   }
 } catch(e) {}
 
@@ -35,7 +35,7 @@ try {
 } catch(e) {}
 
 function saveState() {
-  try { localStorage.setItem(LS_OBTAINED, JSON.stringify(obtained)); window.obtained = obtained; } catch(e) {}
+  try { localStorage.setItem(LS_OBTAINED, JSON.stringify(obtained)); } catch(e) {}
 }
 
 function saveUIState() {
@@ -46,7 +46,19 @@ function toggleObtained(cardId) {
   if (obtained[cardId]) delete obtained[cardId];
   else obtained[cardId] = true;
   saveState();
-  render();
+
+  if (filterMode === 'all') {
+    const el = document.querySelector(`[data-id="${cardId}"]`);
+    if (el) {
+      const isObtained = !!obtained[cardId];
+      el.classList.toggle('obtained', isObtained);
+      el.title = isObtained ? '\u2713 Obtained \u2013 click to unmark' : 'Click to mark as obtained';
+    }
+    updateStats();
+  } else {
+    render();
+  }
+
   if (typeof window.syncObtainedToCloud === 'function') {
     window.syncObtainedToCloud(PAGE_ID, obtained);
   }
@@ -54,7 +66,8 @@ function toggleObtained(cardId) {
 
 // Called by firebase.js after login to merge cloud state
 window.applyCloudState = function(cloudData) {
-  obtained = Object.assign({}, cloudData);
+  Object.keys(obtained).forEach(k => delete obtained[k]);
+  Object.assign(obtained, cloudData);
   saveState();
   render();
 };
