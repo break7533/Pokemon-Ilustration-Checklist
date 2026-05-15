@@ -66,10 +66,30 @@ function toggleObtained(cardId) {
 
 // Called by firebase.js after login to merge cloud state
 window.applyCloudState = function(cloudData) {
+  // Skip if data is identical
+  if (JSON.stringify(obtained) === JSON.stringify(cloudData)) return;
+
+  // Find what changed and apply targeted updates
+  const added = Object.keys(cloudData).filter(k => !obtained[k]);
+  const removed = Object.keys(obtained).filter(k => !cloudData[k]);
+
   Object.keys(obtained).forEach(k => delete obtained[k]);
   Object.assign(obtained, cloudData);
   saveState();
-  render();
+
+  // If in a filtered view, full re-render is needed
+  if (filterMode !== 'all') { render(); return; }
+
+  // Targeted DOM updates
+  added.concat(removed).forEach(cardId => {
+    const el = document.querySelector(`[data-id="${cardId}"]`);
+    if (el) {
+      const isObtained = !!obtained[cardId];
+      el.classList.toggle('obtained', isObtained);
+      el.title = isObtained ? '\u2713 Obtained \u2013 click to unmark' : 'Click to mark as obtained';
+    }
+  });
+  updateStats();
 };
 
 function getFilteredSorted() {
