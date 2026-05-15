@@ -54,11 +54,15 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   renderAuthButton(user);
 
-  // If a checklist page is open, load cloud data and merge
-  if (user && typeof PAGE_ID !== 'undefined' && PAGE_ID !== 'index') {
-    const cloudData = await loadFromCloud(PAGE_ID);
+  if (user && window.PAGE_ID && window.PAGE_ID !== 'index') {
+    const cloudData = await loadFromCloud(window.PAGE_ID);
     if (cloudData && typeof window.applyCloudState === 'function') {
-      window.applyCloudState(cloudData);
+      // Merge: union of local + cloud so neither device loses data
+      const merged = Object.assign({}, window.obtained || {}, cloudData);
+      window.applyCloudState(merged);
+    } else if (typeof window.syncObtainedToCloud === 'function') {
+      // No cloud data yet — push local state up
+      window.syncObtainedToCloud(window.PAGE_ID, window.obtained || {});
     }
   }
 });

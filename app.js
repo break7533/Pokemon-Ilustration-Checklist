@@ -1,9 +1,11 @@
 // Derive storage key from page filename (e.g. "yuka-morii.html" -> "yuka-morii")
 const PAGE_ID = location.pathname.split('/').pop().replace('.html', '') || 'index';
+window.PAGE_ID = PAGE_ID;
 const LS_OBTAINED = PAGE_ID + '_obtained';
 const LS_UI = PAGE_ID + '_ui';
 
 let obtained = {};
+window.obtained = obtained;
 let filterMode = 'all';
 let sortField = 'name';
 let sortDir = { name: 1, date: 1 };
@@ -33,7 +35,7 @@ try {
 } catch(e) {}
 
 function saveState() {
-  try { localStorage.setItem(LS_OBTAINED, JSON.stringify(obtained)); } catch(e) {}
+  try { localStorage.setItem(LS_OBTAINED, JSON.stringify(obtained)); window.obtained = obtained; } catch(e) {}
 }
 
 function saveUIState() {
