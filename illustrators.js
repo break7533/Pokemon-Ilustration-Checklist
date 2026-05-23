@@ -18,8 +18,8 @@ const ILLUSTRATORS = [
   {
     id: "tomokazu-komiya",
     name: "Tomokazu Komiya",
-    sampleImg: "https://pkmncards.com/wp-content/uploads/en_US-SV06-123-tyranitar_ex.jpg",
-    totalCards: 84,
+    sampleImg: "https://pkmncards.com/wp-content/uploads/sv3-5_en_094_std.jpg",
+    totalCards: 253,
     localStorageKey: "tomokazu-komiya_obtained",
     href: "tomokazu-komiya.html"
   }
