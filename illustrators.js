@@ -14,5 +14,13 @@ const ILLUSTRATORS = [
     totalCards: 35,
     localStorageKey: "asako-ito_obtained",
     href: "asako-ito.html"
+  },
+  {
+    id: "tomokazu-komiya",
+    name: "Tomokazu Komiya",
+    sampleImg: "https://pkmncards.com/wp-content/uploads/en_US-SV06-123-tyranitar_ex.jpg",
+    totalCards: 84,
+    localStorageKey: "tomokazu-komiya_obtained",
+    href: "tomokazu-komiya.html"
   }
 ];
