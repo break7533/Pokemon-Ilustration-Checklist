@@ -1,9 +1,9 @@
-const ILLUSTRATORS = [
+const TRACKERS = [
   {
     id: "yuka-morii",
     name: "Yuka Morii",
     sampleImg: "https://pkmncards.com/wp-content/uploads/en_US-SM12-017-rowlet.jpg",
-    totalCards: 210,
+    totalCards: 214,
     localStorageKey: "yuka-morii_obtained",
     href: "yuka-morii.html"
   },
@@ -22,5 +22,13 @@ const ILLUSTRATORS = [
     totalCards: 253,
     localStorageKey: "tomokazu-komiya_obtained",
     href: "tomokazu-komiya.html"
+  },
+  {
+    id: "etb-promos",
+    name: "ETB Promos",
+    sampleImg: "https://enhanced-cardmarket.mave.me/images/etb/nidorina-v1-mep101.jpg",
+    totalCards: 38,
+    localStorageKey: "etb-promos_obtained",
+    href: "etb-promos.html"
   }
 ];

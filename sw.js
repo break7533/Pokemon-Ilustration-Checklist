@@ -6,8 +6,8 @@ self.addEventListener('activate', () => self.clients.claim());
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Only cache images from pkmncards.com
-  if (url.hostname === 'pkmncards.com' && event.request.destination === 'image') {
+  // Cache checklist images from their source hosts.
+  if (['pkmncards.com', 'enhanced-cardmarket.mave.me'].includes(url.hostname) && event.request.destination === 'image') {
     event.respondWith(
       caches.open(CACHE_NAME).then((cache) =>
         cache.match(event.request).then((cached) => {

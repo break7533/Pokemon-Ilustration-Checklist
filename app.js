@@ -116,6 +116,9 @@ function getFilteredSorted() {
     } else {
       const cmp = a.release_date.localeCompare(b.release_date);
       if (cmp !== 0) return cmp * dir;
+      if (PAGE_ID === 'etb-promos' && Number.isInteger(a.page_order) && Number.isInteger(b.page_order)) {
+        return (a.page_order - b.page_order) * -dir;
+      }
       return a.name.localeCompare(b.name);
     }
   });
