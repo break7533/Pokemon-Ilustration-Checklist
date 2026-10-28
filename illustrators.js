@@ -30,5 +30,14 @@ const TRACKERS = [
     totalCards: 38,
     localStorageKey: "etb-promos_obtained",
     href: "etb-promos.html"
+  },
+  {
+    id: "collectr-missing",
+    name: "Collectr Missing",
+    sampleImg: "https://public.getcollectr.com/public-assets/products/product_716437.jpg?optimizer=image&format=webp&width=300&quality=80&strip=metadata",
+    totalCards: 0,
+    localStorageKey: "collectr-missing_obtained",
+    catalogStorageKey: "collectr-missing_state",
+    href: "collectr-missing.html"
   }
 ];

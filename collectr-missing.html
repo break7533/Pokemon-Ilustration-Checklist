@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Collectr Missing Cards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="collectr-page">
+
+<header class="header">
+  <div class="header-inner">
+    <a href="index.html" class="back-link" aria-label="Back to trackers">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </a>
+    <div class="logo">
+      <svg class="logo-icon" viewBox="0 0 36 36" fill="none" aria-label="Pokéball">
+        <circle cx="18" cy="18" r="17" stroke="currentColor" stroke-width="2"/>
+        <path d="M1 18h34" stroke="currentColor" stroke-width="2"/>
+        <circle cx="18" cy="18" r="5" fill="currentColor"/>
+        <circle cx="18" cy="18" r="3" fill="var(--color-surface-2)"/>
+        <path d="M1 18C1 9.163 8.163 2 17 2" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round"/>
+        <path d="M35 18C35 26.837 27.837 34 19 34" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <div class="logo-text">Collectr<br><span>Missing cards</span></div>
+    </div>
+    <div class="collectr-actions">
+      <a class="collectr-button" href="collectr-missing-cards.user.js" target="_blank" rel="noopener noreferrer" title="Open the raw userscript to install it with your userscript manager">Install userscript</a>
+      <label class="collectr-button import-button" for="collectrImport">Import HTML / CSV</label>
+      <input id="collectrImport" class="visually-hidden" type="file" accept=".html,.htm,.csv,text/html,text/csv">
+      <button id="collectrExport" class="collectr-button" type="button" disabled>Copy CSV shown</button>
+      <button id="authBtn" class="auth-btn" aria-label="Sign in with Google">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </button>
+      <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<section class="collectr-toolbar" aria-label="Search and filters">
+  <div class="collectr-toolbar-main">
+    <label class="collectr-search">
+      <span class="visually-hidden">Search missing cards</span>
+      <input id="collectrSearch" type="search" placeholder="Search number, name, set or rarity">
+    </label>
+    <label class="collectr-compact">
+      <input id="collectrCompact" type="checkbox">
+      <span>Compact</span>
+    </label>
+    <span id="collectrShown" class="collectr-shown" aria-live="polite"></span>
+  </div>
+  <div id="collectrRarities" class="collectr-rarities" aria-label="Filter by rarity"></div>
+  <div id="collectrMessage" class="collectr-message" role="status" aria-live="polite"></div>
+</section>
+
+<div class="collectr-stats">
+  <span id="collectrStats">Import a Collectr HTML or CSV export to start.</span>
+  <div class="collectr-progress" role="progressbar" aria-label="Found cards progress" aria-valuemin="0" aria-valuemax="100">
+    <div id="collectrProgress"></div>
+  </div>
+  <span id="collectrProgressText">0%</span>
+</div>
+
+<main class="collectr-main">
+  <div id="collectrEmpty" class="collectr-empty">
+    <h1>Import your missing cards</h1>
+    <p>Use the userscript’s full HTML export for card images and rarities, or import “copy CSV shown” for the filtered cards you want to hunt.</p>
+    <p>Each import replaces this tracker and clears its found marks. Sign in to sync the catalog and progress with Firebase.</p>
+  </div>
+  <div id="collectrSets" class="collectr-sets" aria-live="polite"></div>
+</main>
+
+<script src="collectr-missing.js"></script>
+<script type="module" src="firebase.js"></script>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js');</script>
+</body>
+</html>

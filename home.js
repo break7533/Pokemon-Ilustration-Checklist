@@ -3,12 +3,28 @@ function renderHome() {
 
   TRACKERS.forEach(tracker => {
     let obtainedCount = 0;
+    let totalCards = tracker.totalCards;
     try {
-      const saved = localStorage.getItem(tracker.localStorageKey);
-      if (saved) obtainedCount = Object.keys(JSON.parse(saved)).length;
+      if (tracker.catalogStorageKey) {
+        const saved = localStorage.getItem(tracker.catalogStorageKey);
+        if (saved) {
+          const state = JSON.parse(saved);
+          const cards = state.catalog && Array.isArray(state.catalog.cards) ? state.catalog.cards : [];
+          const obtained = state.found && typeof state.found === 'object' ? state.found : {};
+          const cardIds = new Set(cards.map(card => card.id));
+          totalCards = cards.length;
+          obtainedCount = Object.keys(obtained).filter(id => cardIds.has(id)).length;
+        }
+      } else {
+        const saved = localStorage.getItem(tracker.localStorageKey);
+        if (saved) obtainedCount = Object.keys(JSON.parse(saved)).length;
+      }
     } catch(e) {}
 
-    const pct = tracker.totalCards > 0 ? Math.round((obtainedCount / tracker.totalCards) * 100) : 0;
+    const pct = totalCards > 0 ? Math.round((obtainedCount / totalCards) * 100) : 0;
+    const progressLabel = tracker.catalogStorageKey && totalCards === 0
+      ? 'Import an HTML or CSV export to begin'
+      : `${obtainedCount} / ${totalCards} &mdash; ${pct}%`;
 
     const a = document.createElement('a');
     a.className = 'illustrator-card';
@@ -23,7 +39,7 @@ function renderHome() {
           <div class="illustrator-progress-bar">
             <div class="illustrator-progress-fill" style="width:${pct}%"></div>
           </div>
-          <span class="illustrator-progress-text">${obtainedCount} / ${tracker.totalCards} &mdash; ${pct}%</span>
+          <span class="illustrator-progress-text">${progressLabel}</span>
         </div>
       </div>`;
     grid.appendChild(a);
