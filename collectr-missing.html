@@ -73,10 +73,12 @@
     <p>In the userscript, choose “Scan all sets” for the built-in list of 177 sets (including promos and galleries, as of October 29, 2026). Or select “Use batch sets”, paste set IDs or URLs, and choose “Scan list &amp; add”. Use “Refresh session” to rescan saved sets, then save a new HTML export to import here.</p>
     <p>Base-only scope skips set names containing classic collection, promo, trick or trade, McDonald's, gallery, shiny, radiant, POP Series, or shadowless. All-cards scope includes them. Skipped sets already in your session remain unchanged.</p>
     <p>Each import replaces this tracker and clears its found marks. Sign in to sync the catalog and progress with Firebase.</p>
+    <p>Firebase stores compact card data grouped by set, not the HTML file. Sync uses the existing private users/{uid} document; rules must allow its owner to read and update it. Custom catalog validation must accept version 2 with a sets array. Existing version 1 catalogs remain readable.</p>
   </div>
   <div id="collectrSets" class="collectr-sets" aria-live="polite"></div>
 </main>
 
+<script src="collectr-catalog.js"></script>
 <script src="collectr-missing.js"></script>
 <script type="module" src="firebase.js"></script>
 <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js');</script>

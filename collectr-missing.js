@@ -3,7 +3,7 @@
   const STATE_KEY = 'collectr-missing_state';
   const COMPACT_KEY = 'collectr-missing_compact';
   const MAX_CARDS = 25000;
-  const MAX_CATALOG_BYTES = 850000;
+  const catalogStorage = window.collectrCatalogStorage;
   const root = document.body;
   const searchInput = document.getElementById('collectrSearch');
   const compactInput = document.getElementById('collectrCompact');
@@ -31,9 +31,6 @@
   let hasRendered = false;
   window.obtained = state.found;
   window.collectrCatalogUpdatedAt = state.catalog ? state.catalog.updatedAt : 0;
-  window.collectrCatalogBytes = state.catalog
-    ? new TextEncoder().encode(JSON.stringify(state.catalog)).length
-    : 0;
 
   function normalizeText(value) {
     return String(value || '').trim().replace(/\s+/g, ' ');
@@ -365,6 +362,8 @@
       window.syncObtainedToCloud(PAGE_ID, state.found).then(result => {
         if (result && result.reason === 'too-large') {
           setMessage('Found marks are saved locally, but the Firebase document is at its size limit.', 'error');
+        } else if (result && result.reason === 'cloud-error') {
+          setMessage('Found marks are saved locally, but Firebase sync failed. Check your connection and permissions.', 'error');
         }
       });
     }
@@ -400,7 +399,9 @@
     if (!state.catalog || cloudCatalog.updatedAt >= state.catalog.updatedAt) {
       const nextState = {
         catalog: cloudCatalog,
-        found: cleanFound(state.found, cloudCatalog.cards)
+        found: state.catalog && state.catalog.updatedAt === cloudCatalog.updatedAt
+          ? cleanFound(state.found, cloudCatalog.cards)
+          : {}
       };
       try {
         localStorage.setItem(STATE_KEY, JSON.stringify(nextState));
@@ -412,7 +413,6 @@
       state = nextState;
       window.obtained = state.found;
       window.collectrCatalogUpdatedAt = cloudCatalog.updatedAt;
-      window.collectrCatalogBytes = new TextEncoder().encode(JSON.stringify(cloudCatalog)).length;
       window.catalogRevision++;
       window.stateRevision++;
       render();
@@ -437,10 +437,9 @@
         source: parsed.source,
         cards: parsed.cards
       };
-      const serialized = JSON.stringify(catalog);
-      const catalogBytes = new TextEncoder().encode(serialized).length;
-      if (catalogBytes > MAX_CATALOG_BYTES) {
-        throw new Error('This catalog is too large to sync safely through Firebase. Reduce the export size and try again.');
+      const catalogBytes = catalogStorage.documentBytes(catalogStorage.encode(catalog));
+      if (catalogBytes > catalogStorage.MAX_DOCUMENT_BYTES) {
+        throw new Error('The compact catalog exceeds the safe Firebase document size. Use a smaller export.');
       }
       const description = parsed.source === 'csv'
         ? 'This CSV contains only its exported rows and may be filtered. Cards without HTML metadata will have no rarity or artwork.'
@@ -457,7 +456,6 @@
       state = nextState;
       window.obtained = state.found;
       window.collectrCatalogUpdatedAt = catalog.updatedAt;
-      window.collectrCatalogBytes = catalogBytes;
       window.catalogRevision++;
       window.stateRevision++;
       selectedRarities.clear();
@@ -466,8 +464,6 @@
       openSets.clear();
       hasRendered = false;
       render();
-      syncFound();
-
       const result = await syncCatalog();
       if (result && result.ok) {
         setMessage(`Imported ${parsed.cards.length.toLocaleString()} cards and synced the catalog to Firebase.`, 'success');

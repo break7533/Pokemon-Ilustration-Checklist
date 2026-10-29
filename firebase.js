@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getFirestore, doc, getDoc, setDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "__FIREBASE_API_KEY__",
@@ -15,9 +15,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
-const MAX_CATALOG_BYTES = 850000;
-const MAX_USER_DOCUMENT_BYTES = 900000;
-const USER_DOCUMENT_HEADROOM = 20000;
 
 let currentUser = null;
 
@@ -25,16 +22,13 @@ let currentUser = null;
 window.syncObtainedToCloud = async function(pageId, obtained) {
   if (!currentUser) return { ok: false, reason: 'not-signed-in' };
   try {
-    if (pageId === 'collectr-missing') {
-      const foundBytes = new TextEncoder().encode(JSON.stringify(obtained)).length;
-      if ((window.collectrCatalogBytes || 0) + foundBytes + USER_DOCUMENT_HEADROOM > MAX_USER_DOCUMENT_BYTES) {
-        return { ok: false, reason: 'too-large' };
-      }
-    }
     const ref = doc(db, 'users', currentUser.uid);
     const value = pageId === 'collectr-missing'
       ? { catalogUpdatedAt: window.collectrCatalogUpdatedAt || 0, found: obtained }
       : obtained;
+    if (pageId === 'collectr-missing') {
+      return await writeCollectrFields(ref, { [pageId]: value });
+    }
     await setDoc(ref, { [pageId]: value }, { mergeFields: [pageId] });
     return { ok: true };
   } catch (e) {
@@ -43,19 +37,30 @@ window.syncObtainedToCloud = async function(pageId, obtained) {
   }
 };
 
+async function writeCollectrFields(ref, fields) {
+  const storage = window.collectrCatalogStorage;
+  return runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(ref);
+    const next = { ...(snapshot.exists() ? snapshot.data() : {}), ...fields };
+    if (storage.documentBytes(next) > storage.MAX_DOCUMENT_BYTES) {
+      return { ok: false, reason: 'too-large' };
+    }
+    transaction.set(ref, fields, { mergeFields: Object.keys(fields) });
+    return { ok: true };
+  });
+}
+
 window.syncCatalogToCloud = async function(pageId, catalog) {
   if (!currentUser) return { ok: false, reason: 'not-signed-in' };
   const field = `${pageId}_catalog`;
-  const bytes = new TextEncoder().encode(JSON.stringify(catalog)).length;
-  if (bytes > MAX_CATALOG_BYTES) return { ok: false, reason: 'too-large' };
-  if (pageId === 'collectr-missing') {
-    const foundBytes = new TextEncoder().encode(JSON.stringify(window.obtained || {})).length;
-    if (bytes + foundBytes + USER_DOCUMENT_HEADROOM > MAX_USER_DOCUMENT_BYTES) {
-      return { ok: false, reason: 'too-large' };
-    }
-  }
   try {
     const ref = doc(db, 'users', currentUser.uid);
+    if (pageId === 'collectr-missing') {
+      return await writeCollectrFields(ref, {
+        [field]: window.collectrCatalogStorage.encode(catalog),
+        [pageId]: { catalogUpdatedAt: catalog.updatedAt, found: window.obtained || {} }
+      });
+    }
     await setDoc(ref, { [field]: catalog }, { mergeFields: [field] });
     return { ok: true };
   } catch (e) {
@@ -70,7 +75,11 @@ window.loadCatalogFromCloud = async function(pageId) {
     const ref = doc(db, 'users', currentUser.uid);
     const snap = await getDoc(ref);
     const field = `${pageId}_catalog`;
-    return { ok: true, catalog: snap.exists() ? snap.data()[field] || null : null };
+    const stored = snap.exists() ? snap.data()[field] || null : null;
+    return {
+      ok: true,
+      catalog: pageId === 'collectr-missing' ? window.collectrCatalogStorage.decode(stored) : stored
+    };
   } catch (e) {
     console.warn('Firestore catalog read failed; using the locally saved catalog.', e.message);
     return { ok: false, reason: 'cloud-error' };
