@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Collectr — missing cards in set
 // @namespace    luis.lopes
-// @version      3.4.1
+// @version      3.5.0
 // @description  Open a set page, click Find missing, get the cards of that set you do not own.
 // @match        https://app.getcollectr.com/*
 // @grant        GM_xmlhttpRequest
@@ -212,6 +212,17 @@
         return m ? m[1] : "";
     }
 
+    function parseGroupIds(raw) {
+        const values = String(raw || "").trim().split(/[\s,;]+/).filter(Boolean);
+        if (!values.length) throw new Error("enter at least one set ID or URL");
+        const ids = values.map((value) => {
+            const id = parseGroupId(value);
+            if (!id) throw new Error(`invalid set ID or URL: ${value}`);
+            return id.replace(/^0+(?=\d)/, "");
+        });
+        return [...new Set(ids)];
+    }
+
     function groupIdFromLocation() {
         try {
             const u = new URL(location.href);
@@ -355,6 +366,10 @@
                 stop = `walked past set size (${declaredTotal}) at offset ${offset}`;
                 break;
             }
+            if (page === HARD_PAGE_CAP - 1) {
+                stop = `reached the ${HARD_PAGE_CAP}-page safety limit`;
+                break;
+            }
             await sleep(CONFIG.DELAY_MS);
         }
 
@@ -404,9 +419,9 @@
     const keyNumber = (n) => String(n == null ? "" : n).replace(/\s+/g, "").toLowerCase();
     const groupKey = (number, name) => `${keyNumber(number)}|${keyName(name)}`;
 
-    function buildResult(scan) {
+    function buildResult(scan, scope = CONFIG.SCOPE) {
         const scoped =
-            CONFIG.SCOPE === "base"
+            scope === "base"
                 ? scan.cards.filter((c) => isBaseCard(c, scan.declaredTotal))
                 : scan.cards.slice();
 
@@ -456,7 +471,7 @@
         if (scan.declaredTotal && scan.cards.length !== scan.declaredTotal)
             warn.push(`walked ${scan.cards.length} of ${scan.declaredTotal} printings in the set`);
         if (scan.overlayRows === 0) warn.push("ownership overlay returned nothing — every card will look missing");
-        if (CONFIG.SCOPE === "base" && scan.cards.length && !scan.cards.some(hasDenominator))
+        if (scope === "base" && scan.cards.length && !scan.cards.some(hasDenominator))
             warn.push(
                 `set numbers cards without a total (e.g. "${String((scan.cards[0] || {}).card_number || "")}") — base/secret split unavailable, judging against set size ${scan.declaredTotal || "?"}`
             );
@@ -466,7 +481,7 @@
             rows,
             missing,
             warn,
-            scope: CONFIG.SCOPE,
+            scope,
             setName: scan.setDetails.catalog_group_name || "",
             // Collectr's own chronological set index. groupId is not a usable
             // substitute: 604 (Base Set Unlimited) releases before 1418 (WoTC
@@ -492,7 +507,8 @@
 
     // ------------------------------------------------------------------
     // Session — per-set snapshots accumulated across sets, kept in
-    // localStorage until explicitly cleared. Nothing is stored implicitly.
+    // localStorage until explicitly cleared. Single scans require Add; batch
+    // and refresh actions explicitly save each completed set.
     // ------------------------------------------------------------------
     const SESSION_KEY = "SESSION";
     const SESSION_VERSION = 2;
@@ -551,6 +567,36 @@
         delete s.sets[String(groupId)];
         saveSession(s);
         return s;
+    }
+
+    async function scanSets(groupIds, setStatus, shouldAbort, scopes = {}) {
+        const summary = { saved: [], failed: [], warnings: [], stopped: false };
+        for (const [index, groupId] of groupIds.entries()) {
+            if (shouldAbort()) break;
+            const progress = (text) => setStatus(`set ${index + 1}/${groupIds.length}: ${text}`);
+            try {
+                const scan = await scanSet(groupId, progress, shouldAbort);
+                if (shouldAbort() || scan.stop === "stopped") break;
+                if (scan.stop || !scan.cards.length ||
+                    (scan.declaredTotal && scan.cards.length !== scan.declaredTotal)) {
+                    throw new Error(scan.stop || `incomplete catalog (${scan.cards.length}/${scan.declaredTotal || "?"})`);
+                }
+                const out = buildResult(scan, scopes[groupId] || CONFIG.SCOPE);
+                if (!sessionAdd(out, groupId)) {
+                    summary.failed.push(`${groupId}: session storage full — export and clear space`);
+                    break;
+                }
+                summary.saved.push(String(groupId));
+                summary.warnings.push(...out.warn.map((warning) => `${out.setName || groupId}: ${warning}`));
+            } catch (error) {
+                console.error("[collectr-missing] batch set failed", groupId, error);
+                summary.failed.push(`${groupId}: ${error.message}`);
+                if (/HTTP (401|403|429)\b/.test(error.message)) break;
+            }
+            if (index < groupIds.length - 1 && !shouldAbort()) await sleep(CONFIG.DELAY_MS);
+        }
+        summary.stopped = shouldAbort();
+        return summary;
     }
 
     function sessionClear() {
@@ -970,8 +1016,9 @@ ${boxes.join("\n")}
     .cm-body{padding:10px;overflow:auto}
     .cm-row{display:flex;gap:6px;align-items:center;margin-bottom:7px;flex-wrap:wrap}
     .cm-row label{min-width:62px;color:#9aa2b1}
-    #cm-panel input,#cm-panel select{background:#0f1116;color:#e7e9ee;border:1px solid #333947;
+    #cm-panel input,#cm-panel select,#cm-panel textarea{background:#0f1116;color:#e7e9ee;border:1px solid #333947;
       border-radius:6px;padding:4px 6px;font:inherit;flex:1;min-width:0}
+    #cm-panel textarea{resize:vertical;min-height:54px}
     #cm-panel button{background:#2a3240;color:#e7e9ee;border:1px solid #3a4454;border-radius:6px;
       padding:4px 9px;font:inherit;cursor:pointer}
     #cm-panel button:hover{background:#34404f}
@@ -1016,6 +1063,12 @@ ${boxes.join("\n")}
         <div class="cm-row"><label>Set</label>
           <input id="cm-set" placeholder="groupId or set URL" />
           <button id="cm-here">use page</button></div>
+        <div class="cm-row"><label for="cm-sets">Batch sets</label>
+          <textarea id="cm-sets" aria-describedby="cm-batch-help" placeholder="Set IDs or URLs, separated by lines or commas"></textarea></div>
+        <div class="cm-tiny" id="cm-batch-help">Scans sequentially and saves each completed set. Refresh keeps each set's saved scope. Failed or stopped scans keep previous snapshots.</div>
+        <div class="cm-row">
+          <button id="cm-batch" class="cm-primary">Scan list &amp; add</button>
+          <button id="cm-refresh">Refresh session</button></div>
         <div class="cm-row"><label>Scope</label>
           <select id="cm-scope">
             <option value="base">base only (num &le; set size)</option>
@@ -1052,6 +1105,9 @@ ${boxes.join("\n")}
         const $ = (id) => panel.querySelector(id);
         const head = panel.querySelector(".cm-head");
         const setEl = $("#cm-set"),
+            setsEl = $("#cm-sets"),
+            batchBtn = $("#cm-batch"),
+            refreshBtn = $("#cm-refresh"),
             scopeEl = $("#cm-scope"),
             delayEl = $("#cm-delay"),
             acctEl = $("#cm-acct"),
@@ -1117,12 +1173,14 @@ ${boxes.join("\n")}
                 (here ? ` · this set is in (${here.scope}, ${here.missing.length} missing)` : "");
             sessionEl.classList.toggle("cm-mixed", st.scopes.size > 1);
             const empty = st.setCount === 0;
-            sCsvBtn.disabled = sTsvBtn.disabled = sClearBtn.disabled = empty;
+            sCsvBtn.disabled = sTsvBtn.disabled = empty;
+            sClearBtn.disabled = running || empty;
+            refreshBtn.disabled = running || empty;
             htmlBtn.disabled = saveBtn.disabled = empty;
             const stale = Object.values(session.sets).filter(needsBackfill).length;
             fillBtn.disabled = running || stale === 0;
             fillBtn.textContent = stale ? `Backfill images (${stale})` : "Backfill images";
-            dropBtn.disabled = !here;
+            dropBtn.disabled = running || !here;
             viewBtn.textContent = `View: ${view}`;
             showWarn(lastWarn);
         }
@@ -1136,6 +1194,15 @@ ${boxes.join("\n")}
             } catch (e) {
                 authEl.textContent = e.message;
             }
+        }
+
+        function setBusy(busy) {
+            running = busy;
+            for (const control of [setEl, setsEl, scopeEl, delayEl, acctEl, findBtn, batchBtn, addBtn, resetBtn, $("#cm-here")]) {
+                control.disabled = busy;
+            }
+            stopBtn.disabled = !busy;
+            showSession();
         }
         showAuth();
         showSession();
@@ -1255,10 +1322,8 @@ ${boxes.join("\n")}
                 setStatus(e.message);
                 return false;
             }
-            running = true;
             aborted = false;
-            findBtn.disabled = true;
-            stopBtn.disabled = false;
+            setBusy(true);
             copyBtn.disabled = csvBtn.disabled = true;
             showWarn([]);
             outEl.style.display = "none";
@@ -1272,13 +1337,56 @@ ${boxes.join("\n")}
                 console.error("[collectr-missing]", e);
                 return false;
             } finally {
-                running = false;
-                findBtn.disabled = false;
-                stopBtn.disabled = true;
+                setBusy(false);
             }
         }
 
         findBtn.onclick = runScan;
+
+        async function runBatch(refresh) {
+            if (running) return;
+            let groupIds;
+            const scopes = {};
+            try {
+                if (refresh) {
+                    const entries = Object.values(loadSession().sets).sort(bySetOrder);
+                    groupIds = entries.map((entry) => entry.groupId);
+                    for (const entry of entries) scopes[entry.groupId] = entry.scope;
+                } else {
+                    groupIds = parseGroupIds(setsEl.value);
+                }
+                if (!groupIds.length) throw new Error("no sets in the session to refresh");
+                resolveAccount();
+            } catch (error) {
+                return setStatus(error.message);
+            }
+            aborted = false;
+            setBusy(true);
+            result = null;
+            copyBtn.disabled = csvBtn.disabled = true;
+            outEl.style.display = "none";
+            showWarn([]);
+            try {
+                const summary = await scanSets(groupIds, setStatus, () => aborted, scopes);
+                session = loadSession();
+                if (view === "session") renderSession();
+                setStatus(
+                    `${refresh ? "refresh" : "batch"}: ${summary.saved.length}/${groupIds.length} sets saved` +
+                    ` · ${summary.failed.length} failed` +
+                    ` · ${groupIds.length - summary.saved.length - summary.failed.length} not completed` +
+                    (summary.stopped ? " · stopped; unfinished sets unchanged" : "")
+                );
+                showWarn([...summary.failed, ...summary.warnings]);
+            } catch (error) {
+                console.error("[collectr-missing] batch failed", error);
+                setStatus(`batch failed: ${error.message}`);
+            } finally {
+                session = loadSession();
+                setBusy(false);
+            }
+        }
+        batchBtn.onclick = () => runBatch(false);
+        refreshBtn.onclick = () => runBatch(true);
 
         // Nothing is stored implicitly: a set joins the session only here.
         addBtn.onclick = async () => {
@@ -1373,10 +1481,8 @@ ${boxes.join("\n")}
             } catch (e) {
                 return setStatus(e.message);
             }
-            running = true;
             aborted = false;
-            fillBtn.disabled = true;
-            stopBtn.disabled = false;
+            setBusy(true);
             try {
                 const r = await backfillImages(setStatus, () => aborted);
                 session = loadSession();
@@ -1390,9 +1496,7 @@ ${boxes.join("\n")}
                 console.error("[collectr-missing]", e);
                 setStatus(`backfill failed: ${e.message}`);
             } finally {
-                running = false;
-                stopBtn.disabled = true;
-                showSession();
+                setBusy(false);
                 if (view === "session") renderSession();
             }
         };
