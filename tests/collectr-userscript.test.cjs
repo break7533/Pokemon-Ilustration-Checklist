@@ -28,7 +28,7 @@ function harness(respond) {
     });
     vm.runInContext(source.replace(
         'if (document.body) build();',
-        'globalThis.hooks = { parseGroupIds, scanSets, loadSession, sessionAdd, CONFIG }; if (document.body) build();'
+        'globalThis.hooks = { ALL_SET_IDS, SPECIAL_SET_NAMES, skipSet, parseGroupIds, scanSets, loadSession, sessionAdd, CONFIG }; if (document.body) build();'
     ), context);
     context.hooks.CONFIG.DELAY_MS = 0;
     return { ...context.hooks, requests, storage };
@@ -60,6 +60,72 @@ function seed(h, id) {
         sets: { [id]: { groupId: id, name: 'Previous snapshot', scope: 'base', missing: [{ name: 'Old card' }] } },
     }));
 }
+
+test('static directory has 177 unique numeric IDs in supplied order', () => {
+    const h = harness(success);
+    assert.equal(h.ALL_SET_IDS.length, 177);
+    assert.equal(new Set(h.ALL_SET_IDS).size, 177);
+    assert.ok(h.ALL_SET_IDS.every(id => /^\d+$/.test(id)));
+    assert.equal(h.ALL_SET_IDS[0], '24837');
+    assert.equal(h.ALL_SET_IDS.at(-1), '1418');
+});
+
+test('scans all static sets and saves every result in source order', async () => {
+    const h = harness(success);
+    h.CONFIG.SCOPE = 'all';
+    const summary = await h.scanSets(h.ALL_SET_IDS, () => {}, () => false);
+    assert.deepEqual(Array.from(summary.saved), Array.from(h.ALL_SET_IDS));
+    assert.equal(summary.failed.length, 0);
+    assert.equal(Object.keys(h.loadSession().sets).length, 177);
+    assert.equal(h.requests.length, 354);
+});
+
+test('base-only scans skip all 45 matching static sets without requesting them', async () => {
+    const h = harness(success);
+    const summary = await h.scanSets(h.ALL_SET_IDS, () => {}, () => false);
+    assert.equal(summary.skipped.length, 45);
+    assert.equal(summary.saved.length, 132);
+    assert.equal(summary.failed.length, 0);
+    assert.equal(h.requests.length, 264);
+    assert.ok(h.requests.filter(url => url.pathname === '/catalog')
+        .every(url => !h.SPECIAL_SET_NAMES[url.searchParams.get('groupId')]));
+});
+
+test('name exclusions are case-insensitive, include curly apostrophes, and only apply to base scope', () => {
+    const h = harness(success);
+    for (const name of ['Classic Collection', 'PROMOS', 'Promo', 'Trick or Trade',
+        "McDonald's", 'McDonald’s', 'Gallery', 'Shiny', 'Radiant', 'POP Series', 'Shadowless']) {
+        assert.equal(h.skipSet(`Set ${name} 2026`, 'base'), true, name);
+        assert.equal(h.skipSet(`Set ${name} 2026`, 'all'), false, name);
+    }
+    for (const name of ['Shining Fates', 'Astral Radiance', 'Base Set (Unlimited)']) {
+        assert.equal(h.skipSet(name, 'base'), false, name);
+    }
+});
+
+test('custom unknown set names are excluded after the first catalog response', async () => {
+    const h = harness(url => {
+        const response = success(url);
+        if (url.pathname === '/catalog') response.body.setDetails.catalog_group_name = 'New Promo Set';
+        return response;
+    });
+    const summary = await h.scanSets(['123456'], () => {}, () => false);
+    assert.equal(summary.skipped.length, 1);
+    assert.equal(h.requests.length, 1);
+    assert.equal(Object.keys(h.loadSession().sets).length, 0);
+});
+
+test('refresh preserves skipped snapshots and honors each saved scope', async () => {
+    const h = harness(success);
+    seed(h, '24451');
+    let summary = await h.scanSets(['24451'], () => {}, () => false, { '24451': 'base' });
+    assert.equal(summary.skipped.length, 1);
+    assert.equal(h.loadSession().sets['24451'].name, 'Previous snapshot');
+    assert.equal(h.requests.length, 0);
+    summary = await h.scanSets(['24451'], () => {}, () => false, { '24451': 'all' });
+    assert.equal(summary.saved.length, 1);
+    assert.equal(h.loadSession().sets['24451'].scope, 'all');
+});
 
 test('parses IDs and URLs with mixed separators, removes duplicates, rejects invalid input', () => {
     const h = harness(success);

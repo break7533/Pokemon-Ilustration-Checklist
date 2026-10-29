@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Collectr — missing cards in set
 // @namespace    luis.lopes
-// @version      3.5.0
+// @version      3.6.1
 // @description  Open a set page, click Find missing, get the cards of that set you do not own.
 // @match        https://app.getcollectr.com/*
 // @grant        GM_xmlhttpRequest
@@ -76,6 +76,77 @@
 
     const PAGE_SIZE = 30; // server caps pages at 30 regardless of `limit`
     const HARD_PAGE_CAP = 40; // 1200 cards; no real set is close
+
+    // Collectr set directory snapshot supplied on 2026-10-29, in source order.
+    // Includes promos, galleries, and other subsets; new sets require an update.
+    const ALL_SET_IDS = `
+        24837 24722 24688 24655 24587 24541 24448 24380 24451 24326 24325
+        24269 24073 24163 23821 23651 23537 23561 23529 23473 23381 23353
+        23286 23237 23266 23306 23228 23120 22872 22873 17689 17688 17674
+        3170 3179 3172 3118 3150 3064 3068 3040 3020 2948 2906 2931 2867
+        2848 2807 2765 2781 2754 2782 2701 2685 2675 2626 2545 2585 2534
+        2555 2594 2480 2464 2420 2409 2377 2328 2364 2295 2278 2209 2178
+        2071 2054 1957 2148 1919 1861 1863 1842 1815 1780 3087 1729 1728
+        1701 1694 1661 1576 1534 1525 1509 1494 1481 1692 1464 1522 1451
+        1387 1465 1409 1370 1382 1413 1408 1426 1394 1386 1412 1385 1424
+        1400 1427 1401 1407 1415 1381 1403 1399 1402 1453 1433 1391 1384
+        1367 1406 1446 1450 1414 1432 1439 1452 1442 1447 1422 1368 1369
+        1417 1390 1405 1380 1421 1430 1383 1411 1395 1379 1378 1429 1398
+        1410 1404 1428 1419 1416 1377 1376 1392 1393 1372 1397 1375 1374
+        1444 1389 648 1434 1396 1440 1441 1373 605 630 635 604 1663 1418
+    `.trim().split(/\s+/);
+
+    // Names from the same directory let excluded sets skip API requests entirely.
+    const SPECIAL_SET_NAMES = {
+        "24837": "30th Celebration: Classic Collection",
+        "24451": "Mega Evolution Promos",
+        "24163": "McDonald's Promos 2024",
+        "23561": "Trick or Trade BOOster Bundle 2024",
+        "23266": "Trick or Trade BOOster Bundle 2023",
+        "23306": "McDonald's Promos 2023",
+        "22872": "Scarlet & Violet Promo",
+        "17689": "Crown Zenith: Galarian Gallery",
+        "17674": "Silver Tempest Trainer Gallery",
+        "3179": "Trick or Trade BOOster Bundle",
+        "3172": "Lost Origin Trainer Gallery",
+        "3150": "McDonald's Promos 2022",
+        "3068": "Astral Radiance Trainer Gallery",
+        "3020": "Brilliant Stars Trainer Gallery",
+        "2931": "Celebrations: Classic Collection",
+        "2781": "Shining Fates: Shiny Vault",
+        "2782": "McDonald's 25th Anniversary Promos",
+        "2545": "Sword & Shield Promo",
+        "2555": "McDonald's Promos 2019",
+        "2594": "Hidden Fates: Shiny Vault",
+        "2364": "McDonald's Promos 2018",
+        "2148": "McDonald's Promos 2017",
+        "1861": "Sun & Moon Promo",
+        "3087": "McDonald's Promos 2016",
+        "1729": "Generations: Radiant Collection",
+        "1694": "McDonald's Promos 2015",
+        "1692": "McDonald's Promos 2014",
+        "1451": "XY Promos",
+        "1465": "Legendary Treasures: Radiant Collections",
+        "1427": "McDonald's Promos 2012",
+        "1401": "McDonald's Promos 2011",
+        "1407": "Black and White Promos",
+        "1453": "HGSS Promos",
+        "1446": "POP Series 9",
+        "1450": "POP Series 8",
+        "1414": "POP Series 7",
+        "1432": "POP Series 6",
+        "1439": "POP Series 5",
+        "1452": "POP Series 4",
+        "1442": "POP Series 3",
+        "1447": "POP Series 2",
+        "1422": "POP Series 1",
+        "1421": "Diamond and Pearl Promos",
+        "1663": "Base Set (1st Edition & Shadowless)",
+        "1418": "WoTC Promo",
+    };
+    const BASE_SET_EXCLUSIONS = /classic collection|promo|trick or trade|mcdonald's|gallery|shiny|radiant|pop series|shadowless/i;
+    const skipSet = (name, scope) => scope === "base" &&
+        BASE_SET_EXCLUSIONS.test(String(name || "").replace(/[\u2018\u2019]/g, "'"));
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -265,6 +336,11 @@
     // backfill, which already knows which cards are missing and needs just
     // the artwork and rarity — half the requests of a real scan.
     async function scanSet(groupId, setStatus, shouldAbort, opts) {
+        const scope = opts?.scope || CONFIG.SCOPE;
+        const knownName = SPECIAL_SET_NAMES[groupId] || loadSession().sets[groupId]?.name;
+        if (!opts?.skipOwnership && skipSet(knownName, scope)) {
+            return { skipped: true, setName: knownName };
+        }
         const cards = [];
         const seen = new Set();
         const owned = new Map(); // product_id -> quantity
@@ -299,6 +375,9 @@
             );
             if (!declaredTotal) {
                 meta = { groupDetails: res.groupDetails || {}, setDetails: res.setDetails || {} };
+                if (!opts?.skipOwnership && skipSet(meta.setDetails.catalog_group_name, scope)) {
+                    return { skipped: true, setName: meta.setDetails.catalog_group_name };
+                }
                 const n = Number(meta.setDetails.number_of_cards_in_group);
                 if (Number.isFinite(n) && n > 0) declaredTotal = n;
             }
@@ -570,18 +649,24 @@
     }
 
     async function scanSets(groupIds, setStatus, shouldAbort, scopes = {}) {
-        const summary = { saved: [], failed: [], warnings: [], stopped: false };
+        const summary = { saved: [], skipped: [], failed: [], warnings: [], stopped: false };
         for (const [index, groupId] of groupIds.entries()) {
             if (shouldAbort()) break;
             const progress = (text) => setStatus(`set ${index + 1}/${groupIds.length}: ${text}`);
             try {
-                const scan = await scanSet(groupId, progress, shouldAbort);
+                const scope = scopes[groupId] || CONFIG.SCOPE;
+                const scan = await scanSet(groupId, progress, shouldAbort, { scope });
+                if (scan.skipped) {
+                    summary.skipped.push(String(groupId));
+                    progress(`skipped ${scan.setName} (base-only scope)`);
+                    continue;
+                }
                 if (shouldAbort() || scan.stop === "stopped") break;
                 if (scan.stop || !scan.cards.length ||
                     (scan.declaredTotal && scan.cards.length !== scan.declaredTotal)) {
                     throw new Error(scan.stop || `incomplete catalog (${scan.cards.length}/${scan.declaredTotal || "?"})`);
                 }
-                const out = buildResult(scan, scopes[groupId] || CONFIG.SCOPE);
+                const out = buildResult(scan, scope);
                 if (!sessionAdd(out, groupId)) {
                     summary.failed.push(`${groupId}: session storage full — export and clear space`);
                     break;
@@ -1063,12 +1148,16 @@ ${boxes.join("\n")}
         <div class="cm-row"><label>Set</label>
           <input id="cm-set" placeholder="groupId or set URL" />
           <button id="cm-here">use page</button></div>
-        <div class="cm-row"><label for="cm-sets">Batch sets</label>
-          <textarea id="cm-sets" aria-describedby="cm-batch-help" placeholder="Set IDs or URLs, separated by lines or commas"></textarea></div>
-        <div class="cm-tiny" id="cm-batch-help">Scans sequentially and saves each completed set. Refresh keeps each set's saved scope. Failed or stopped scans keep previous snapshots.</div>
         <div class="cm-row">
-          <button id="cm-batch" class="cm-primary">Scan list &amp; add</button>
+          <button id="cm-all" class="cm-primary">Scan all sets (${ALL_SET_IDS.length})</button>
+          <button id="cm-use-batch" aria-expanded="false" aria-controls="cm-batch-options">Use batch sets</button>
           <button id="cm-refresh">Refresh session</button></div>
+        <div id="cm-batch-options" hidden>
+          <div class="cm-row"><label for="cm-sets">Batch sets</label>
+            <textarea id="cm-sets" aria-describedby="cm-batch-help" placeholder="Set IDs or URLs, separated by lines or commas"></textarea></div>
+          <div class="cm-row"><button id="cm-batch" class="cm-primary">Scan list &amp; add</button></div>
+        </div>
+        <div class="cm-tiny" id="cm-batch-help">Scans sequentially and saves each completed set. Refresh keeps each set's saved scope. Failed, stopped, or skipped scans keep previous snapshots. All sets uses a static list from 2026-10-29. Base only skips names containing: classic collection, promo, trick or trade, McDonald's, gallery, shiny, radiant, POP Series, shadowless.</div>
         <div class="cm-row"><label>Scope</label>
           <select id="cm-scope">
             <option value="base">base only (num &le; set size)</option>
@@ -1107,6 +1196,8 @@ ${boxes.join("\n")}
         const setEl = $("#cm-set"),
             setsEl = $("#cm-sets"),
             batchBtn = $("#cm-batch"),
+            allBtn = $("#cm-all"),
+            useBatchBtn = $("#cm-use-batch"),
             refreshBtn = $("#cm-refresh"),
             scopeEl = $("#cm-scope"),
             delayEl = $("#cm-delay"),
@@ -1198,7 +1289,7 @@ ${boxes.join("\n")}
 
         function setBusy(busy) {
             running = busy;
-            for (const control of [setEl, setsEl, scopeEl, delayEl, acctEl, findBtn, batchBtn, addBtn, resetBtn, $("#cm-here")]) {
+            for (const control of [setEl, setsEl, scopeEl, delayEl, acctEl, findBtn, batchBtn, allBtn, useBatchBtn, addBtn, resetBtn, $("#cm-here")]) {
                 control.disabled = busy;
             }
             stopBtn.disabled = !busy;
@@ -1329,6 +1420,11 @@ ${boxes.join("\n")}
             outEl.style.display = "none";
             try {
                 const scan = await scanSet(groupId, setStatus, () => aborted);
+                if (scan.skipped) {
+                    result = null;
+                    setStatus(`skipped ${scan.setName} (base-only scope)`);
+                    return false;
+                }
                 result = { scan };
                 render(buildResult(scan));
                 return true;
@@ -1343,8 +1439,9 @@ ${boxes.join("\n")}
 
         findBtn.onclick = runScan;
 
-        async function runBatch(refresh) {
+        async function runBatch(mode) {
             if (running) return;
+            const refresh = mode === "refresh";
             let groupIds;
             const scopes = {};
             try {
@@ -1352,6 +1449,8 @@ ${boxes.join("\n")}
                     const entries = Object.values(loadSession().sets).sort(bySetOrder);
                     groupIds = entries.map((entry) => entry.groupId);
                     for (const entry of entries) scopes[entry.groupId] = entry.scope;
+                } else if (mode === "all") {
+                    groupIds = ALL_SET_IDS;
                 } else {
                     groupIds = parseGroupIds(setsEl.value);
                 }
@@ -1371,9 +1470,10 @@ ${boxes.join("\n")}
                 session = loadSession();
                 if (view === "session") renderSession();
                 setStatus(
-                    `${refresh ? "refresh" : "batch"}: ${summary.saved.length}/${groupIds.length} sets saved` +
+                    `${refresh ? "refresh" : mode === "all" ? "all sets" : "batch"}: ${summary.saved.length}/${groupIds.length} sets saved` +
                     ` · ${summary.failed.length} failed` +
-                    ` · ${groupIds.length - summary.saved.length - summary.failed.length} not completed` +
+                    ` · ${summary.skipped.length} skipped` +
+                    ` · ${groupIds.length - summary.saved.length - summary.failed.length - summary.skipped.length} not completed` +
                     (summary.stopped ? " · stopped; unfinished sets unchanged" : "")
                 );
                 showWarn([...summary.failed, ...summary.warnings]);
@@ -1385,8 +1485,15 @@ ${boxes.join("\n")}
                 setBusy(false);
             }
         }
-        batchBtn.onclick = () => runBatch(false);
-        refreshBtn.onclick = () => runBatch(true);
+        useBatchBtn.onclick = () => {
+            const options = $("#cm-batch-options");
+            options.hidden = !options.hidden;
+            useBatchBtn.setAttribute("aria-expanded", String(!options.hidden));
+            if (!options.hidden) setsEl.focus();
+        };
+        batchBtn.onclick = () => runBatch("list");
+        allBtn.onclick = () => runBatch("all");
+        refreshBtn.onclick = () => runBatch("refresh");
 
         // Nothing is stored implicitly: a set joins the session only here.
         addBtn.onclick = async () => {
@@ -1396,6 +1503,9 @@ ${boxes.join("\n")}
             // Reuse the scan already on screen when it is this set; scope changes
             // re-render from the same scan, so they need no new requests either.
             const fresh = result && result.scan && String(result.scan.groupId) === String(groupId);
+            if (fresh && skipSet(result.out.setName, CONFIG.SCOPE)) {
+                return setStatus(`skipped ${result.out.setName} (base-only scope)`);
+            }
             if (!fresh && !(await runScan())) return;
             if (!result || !result.out) return;
             const saved = sessionAdd(result.out, groupId);
