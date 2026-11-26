@@ -23,9 +23,12 @@
   const sharedResetButton = document.getElementById('collectrSharedReset');
 
   const SHARE_PREFIX = '#share=';
+  const SHORT_SHARE_PREFIX = '#s=';
+  const SHARE_LOAD_TIMEOUT_MS = 15000;
   const sharedToken = location.hash.startsWith(SHARE_PREFIX) ? location.hash.slice(SHARE_PREFIX.length) : '';
-  const isShared = Boolean(sharedToken);
-  const sharedKey = isShared ? `collectr-missing_shared_${hashString(sharedToken)}` : '';
+  const sharedId = location.hash.startsWith(SHORT_SHARE_PREFIX) ? location.hash.slice(SHORT_SHARE_PREFIX.length) : '';
+  const isShared = Boolean(sharedToken || sharedId);
+  const sharedKey = isShared ? `collectr-missing_shared_${hashString(sharedId || sharedToken)}` : '';
 
   // firebase.js skips cloud load/sync for 'index', so a shared view never touches anyone's account.
   window.PAGE_ID = isShared ? 'index' : PAGE_ID;
@@ -596,8 +599,13 @@
         { version: 1, updatedAt: Date.now(), source: state.catalog.source, cards },
         { search: searchInput.value.trim(), rarities: selectedRarities, collapsed: [...collapsedSets].filter(set => sets.has(set)) }
       );
-      const url = `${location.origin}${location.pathname}${SHARE_PREFIX}${token}`;
-      const done = `share link for ${cards.length.toLocaleString()} missing cards with your current filters. Anything changed from that link stays in the other person's browser.`;
+      const base = `${location.origin}${location.pathname}`;
+      const saved = window.collectrShares ? await window.collectrShares.create(token) : { ok: false, reason: 'cloud-error' };
+      const url = saved.ok ? `${base}${SHORT_SHARE_PREFIX}${saved.id}` : `${base}${SHARE_PREFIX}${token}`;
+      const fallback = saved.ok ? ''
+        : saved.reason === 'not-signed-in' ? ' Sign in to get a short link instead of this long one.'
+        : ' A short link could not be saved, so this is the long version.';
+      const done = `share link for ${cards.length.toLocaleString()} missing cards with your current filters. Anything changed from that link stays in the other person's browser.${fallback}`;
       try {
         await navigator.clipboard.writeText(url);
         setMessage(`Copied a ${done}`, 'success');
@@ -614,11 +622,34 @@
     }
   });
 
-  function showSharedError() {
+  function showSharedError(reason) {
+    const detail = reason === 'not-found'
+      ? 'This shared list no longer exists. Ask the person who shared it for a new link.'
+      : reason === 'cloud-error'
+        ? 'The shared list could not be downloaded. Check your connection or disable ad blockers for this site, then reload.'
+        : 'The link may be incomplete. Ask the person who shared it to copy a new one.';
     emptyState.replaceChildren(
       createElement('h1', '', 'This share link could not be opened'),
-      createElement('p', '', 'The link may be incomplete. Ask the person who shared it to copy a new one.')
+      createElement('p', '', detail)
     );
+  }
+
+  function waitForShares() {
+    if (window.collectrShares) return Promise.resolve(window.collectrShares);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Object.assign(new Error('Firebase did not load.'), { reason: 'cloud-error' })), SHARE_LOAD_TIMEOUT_MS);
+      window.addEventListener('collectr-shares-ready', () => {
+        clearTimeout(timer);
+        resolve(window.collectrShares);
+      }, { once: true });
+    });
+  }
+
+  async function loadSharedToken() {
+    if (!sharedId) return sharedToken;
+    const result = await (await waitForShares()).load(sharedId);
+    if (!result.ok) throw Object.assign(new Error('Shared list unavailable.'), { reason: result.reason });
+    return result.payload;
   }
 
   async function loadShared() {
@@ -630,7 +661,7 @@
     statsLabel.textContent = 'Loading shared list…';
     emptyState.hidden = true;
     try {
-      const shared = await catalogStorage.decodeShare(sharedToken);
+      const shared = await catalogStorage.decodeShare(await loadSharedToken());
       if (!isCatalog(shared.catalog)) throw new Error('Invalid shared catalog.');
       let found = {};
       try {
@@ -650,7 +681,7 @@
       render();
     } catch (error) {
       console.error('Could not open the Collectr share link.', error);
-      showSharedError();
+      showSharedError(error.reason);
       render();
       statsLabel.textContent = 'Shared list unavailable.';
     }

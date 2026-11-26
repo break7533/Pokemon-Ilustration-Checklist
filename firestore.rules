@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Each signed-in user can only read and write their own tracker data.
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Collectr share snapshots: anyone with the (unguessable) link can read one,
+    // nobody can list them, only the signed-in owner can create or delete them,
+    // and nobody can edit them after creation.
+    match /shares/{shareId} {
+      allow get: if true;
+      allow list, update: if false;
+      allow create: if request.auth != null
+        && shareId.size() == 20
+        && request.resource.data.keys().hasOnly(['ownerUid', 'createdAt', 'payload'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.payload is string
+        && request.resource.data.payload.size() < 900000;
+      allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
+    }
+  }
+}

@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getFirestore, doc, getDoc, setDoc, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "__FIREBASE_API_KEY__",
@@ -100,6 +100,41 @@ async function loadFromCloud(pageId) {
   }
   return null;
 };
+
+const SHARE_ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+function randomShareId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return Array.from(bytes, byte => SHARE_ID_ALPHABET[byte % SHARE_ID_ALPHABET.length]).join('');
+}
+
+// Share snapshots live in their own collection so recipients never read or write the owner's user document.
+window.collectrShares = {
+  async create(payload) {
+    if (!currentUser) return { ok: false, reason: 'not-signed-in' };
+    try {
+      const id = randomShareId();
+      await setDoc(doc(db, 'shares', id), { ownerUid: currentUser.uid, createdAt: serverTimestamp(), payload });
+      return { ok: true, id };
+    } catch (e) {
+      console.warn('Firestore share write failed; falling back to a long link.', e.message);
+      return { ok: false, reason: 'cloud-error' };
+    }
+  },
+  async load(id) {
+    try {
+      const snap = await getDoc(doc(db, 'shares', id));
+      if (!snap.exists() || typeof snap.data().payload !== 'string') return { ok: false, reason: 'not-found' };
+      return { ok: true, payload: snap.data().payload };
+    } catch (e) {
+      console.warn('Firestore share read failed.', e.message);
+      return { ok: false, reason: 'cloud-error' };
+    }
+  }
+};
+if (typeof window.dispatchEvent === 'function' && typeof Event === 'function') {
+  window.dispatchEvent(new Event('collectr-shares-ready'));
+}
 
 function renderAuthButton(user) {
   const btn = document.getElementById('authBtn');
