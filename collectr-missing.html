@@ -28,11 +28,12 @@
       <div class="logo-text">Collectr<br><span>Missing cards</span></div>
     </div>
     <div class="collectr-actions">
-      <a class="collectr-button" href="collectr-missing-cards.user.js" target="_blank" rel="noopener noreferrer" title="Open the raw userscript to install it with your userscript manager">Install userscript</a>
-      <label class="collectr-button import-button" for="collectrImport">Import HTML / CSV</label>
+      <a class="collectr-button collectr-owner-only" href="collectr-missing-cards.user.js" target="_blank" rel="noopener noreferrer" title="Open the raw userscript to install it with your userscript manager">Install userscript</a>
+      <label class="collectr-button import-button collectr-owner-only" for="collectrImport">Import HTML / CSV</label>
       <input id="collectrImport" class="visually-hidden" type="file" accept=".html,.htm,.csv,text/html,text/csv">
       <button id="collectrExport" class="collectr-button" type="button" disabled>Copy CSV shown</button>
-      <button id="authBtn" class="auth-btn" aria-label="Sign in with Google">
+      <button id="collectrShare" class="collectr-button" type="button" disabled title="Copy a link to your missing cards with the current search, rarity filters and collapsed sets">Share link</button>
+      <button id="authBtn" class="auth-btn collectr-owner-only" aria-label="Sign in with Google">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       </button>
       <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">
@@ -56,6 +57,10 @@
     <span id="collectrShown" class="collectr-shown" aria-live="polite"></span>
   </div>
   <div id="collectrRarities" class="collectr-rarities" aria-label="Filter by rarity"></div>
+  <div id="collectrSharedBanner" class="collectr-shared-banner" hidden>
+    <span>Shared missing list. Anything you change here only affects this browser, never the owner’s tracker. Found marks are kept; reloading restores the shared filters.</span>
+    <button id="collectrSharedReset" class="collectr-clear-filters" type="button">Reset to shared version</button>
+  </div>
   <div id="collectrMessage" class="collectr-message" role="status" aria-live="polite"></div>
 </section>
 
@@ -74,13 +79,14 @@
     <p>In the userscript, choose “Scan all sets” for the built-in list of 177 sets (including promos and galleries, as of October 29, 2026). Or select “Use batch sets”, paste set IDs or URLs, and choose “Scan list &amp; add”. Use “Refresh session” to rescan saved sets, then save a new HTML export to import here.</p>
     <p>Base-only scope skips set names containing classic collection, promo, trick or trade, McDonald's, gallery, shiny, radiant, POP Series, or shadowless. All-cards scope includes them. Skipped sets already in your session remain unchanged.</p>
     <p>Each import replaces this tracker and clears its found marks. Sign in to sync the catalog and progress with Firebase.</p>
+    <p>“Share link” copies a link containing your missing cards plus the current search, rarity filters and collapsed sets. Whoever opens it can filter and mark cards found; those changes stay in their browser and never sync to your tracker or Firebase.</p>
     <p>Firebase stores compact card data grouped by set, not the HTML file. Sync uses the existing private users/{uid} document; rules must allow its owner to read and update it. Custom catalog validation must accept version 2 with a sets array. Existing version 1 catalogs remain readable.</p>
   </div>
   <div id="collectrSets" class="collectr-sets" aria-live="polite"></div>
 </main>
 
-<script src="collectr-catalog.js"></script>
-<script src="collectr-missing.js"></script>
+<script src="collectr-catalog.js?v=2"></script>
+<script src="collectr-missing.js?v=2"></script>
 <script type="module" src="firebase.js"></script>
 <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js');</script>
 </body>

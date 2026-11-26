@@ -130,3 +130,19 @@ test('Firebase loads legacy catalogs and reports malformed compact data as a clo
     h = firebaseHarness({ 'collectr-missing_catalog': { version: 2, sets: null } });
     assert.equal((await h.window.loadCatalogFromCloud('collectr-missing')).reason, 'cloud-error');
 });
+
+test('share links round trip the catalog and filters through a URL-safe token', async () => {
+    const original = catalog();
+    const token = await storage.encodeShare(original, {
+        search: 'pika', rarities: new Set(['Common']), collapsed: ['Other Set']
+    });
+    assert.match(token, /^[A-Za-z0-9_-]+$/);
+    const shared = await storage.decodeShare(token);
+    assert.deepEqual(shared.catalog, original);
+    assert.deepEqual(shared.filters, { search: 'pika', rarities: ['Common'], collapsed: ['Other Set'] });
+});
+
+test('malformed share links are rejected', async () => {
+    await assert.rejects(storage.decodeShare('not a token!'), /Invalid share link/);
+    await assert.rejects(storage.decodeShare('AAAA'));
+});

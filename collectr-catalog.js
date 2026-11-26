@@ -70,9 +70,68 @@
     throw new Error('Unsupported value in Collectr storage.');
   }
 
+  const SHARE_VERSION = 1;
+  const MAX_SHARE_BYTES = 8 * 1024 * 1024;
+
+  function bytesToBase64Url(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function base64UrlToBytes(text) {
+    if (!/^[A-Za-z0-9_-]+$/.test(text)) throw new Error('Invalid share link.');
+    const base64 = text.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  async function pipe(bytes, stream) {
+    return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+  }
+
+  async function encodeShare(catalog, filters) {
+    const payload = {
+      v: SHARE_VERSION,
+      catalog: encode(catalog),
+      filters: {
+        search: String(filters.search || ''),
+        rarities: [...(filters.rarities || [])].map(String),
+        collapsed: [...(filters.collapsed || [])].map(String)
+      }
+    };
+    const json = new TextEncoder().encode(JSON.stringify(payload));
+    return bytesToBase64Url(await pipe(json, new CompressionStream('deflate-raw')));
+  }
+
+  async function decodeShare(text) {
+    const inflated = await pipe(base64UrlToBytes(text), new DecompressionStream('deflate-raw'));
+    if (inflated.length > MAX_SHARE_BYTES) throw new Error('This share link is too large.');
+    const payload = JSON.parse(new TextDecoder().decode(inflated));
+    if (!payload || payload.v !== SHARE_VERSION || !payload.catalog || payload.catalog.version !== 2) {
+      throw new Error('This share link is not supported.');
+    }
+    const filters = payload.filters && typeof payload.filters === 'object' ? payload.filters : {};
+    const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
+    return {
+      catalog: decode(payload.catalog),
+      filters: {
+        search: typeof filters.search === 'string' ? filters.search : '',
+        rarities: strings(filters.rarities),
+        collapsed: strings(filters.collapsed)
+      }
+    };
+  }
+
   const storage = {
     encode,
     decode,
+    encodeShare,
+    decodeShare,
     documentBytes: value => 1024 + valueBytes(value),
     MAX_DOCUMENT_BYTES
   };

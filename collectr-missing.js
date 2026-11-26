@@ -18,12 +18,21 @@
   const statsLabel = document.getElementById('collectrStats');
   const progressBar = document.getElementById('collectrProgress');
   const progressText = document.getElementById('collectrProgressText');
+  const shareButton = document.getElementById('collectrShare');
+  const sharedBanner = document.getElementById('collectrSharedBanner');
+  const sharedResetButton = document.getElementById('collectrSharedReset');
 
-  window.PAGE_ID = PAGE_ID;
+  const SHARE_PREFIX = '#share=';
+  const sharedToken = location.hash.startsWith(SHARE_PREFIX) ? location.hash.slice(SHARE_PREFIX.length) : '';
+  const isShared = Boolean(sharedToken);
+  const sharedKey = isShared ? `collectr-missing_shared_${hashString(sharedToken)}` : '';
+
+  // firebase.js skips cloud load/sync for 'index', so a shared view never touches anyone's account.
+  window.PAGE_ID = isShared ? 'index' : PAGE_ID;
   window.catalogRevision = 0;
   window.stateRevision = 0;
 
-  let state = loadState();
+  let state = isShared ? { catalog: null, found: {} } : loadState();
   let search = '';
   let selectedRarities = new Set();
   let visibleCards = [];
@@ -34,6 +43,15 @@
 
   function normalizeText(value) {
     return String(value || '').trim().replace(/\s+/g, ' ');
+  }
+
+  function hashString(value) {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < value.length; i++) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
   }
 
   function normalizeIdentityPart(value) {
@@ -107,7 +125,8 @@
 
   function saveState() {
     try {
-      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+      if (isShared) localStorage.setItem(sharedKey, JSON.stringify(state.found));
+      else localStorage.setItem(STATE_KEY, JSON.stringify(state));
       window.obtained = state.found;
       return true;
     } catch (error) {
@@ -311,6 +330,7 @@
     emptyState.hidden = cards.length > 0;
     setsContainer.hidden = cards.length === 0;
     exportButton.disabled = cards.length === 0;
+    shareButton.disabled = cards.length === 0;
     renderRarities(cards);
     setsContainer.replaceChildren();
     visibleCards = cards.filter(isVisible);
@@ -363,6 +383,7 @@
   }
 
   function syncFound() {
+    if (isShared) return;
     if (typeof window.syncObtainedToCloud === 'function') {
       window.syncObtainedToCloud(PAGE_ID, state.found).then(result => {
         if (result && result.reason === 'too-large') {
@@ -375,19 +396,21 @@
   }
 
   function syncCatalog() {
-    if (!state.catalog || typeof window.syncCatalogToCloud !== 'function') {
+    if (isShared || !state.catalog || typeof window.syncCatalogToCloud !== 'function') {
       return Promise.resolve({ ok: false, reason: 'not-ready' });
     }
     return window.syncCatalogToCloud(PAGE_ID, state.catalog);
   }
 
   window.applyCloudState = function(cloudData) {
+    if (isShared) return;
     state.found = cleanFound(cloudData, state.catalog ? state.catalog.cards : []);
     saveState();
     render();
   };
 
   window.applyCloudCatalog = async function(cloudCatalog, revisionAtLoad) {
+    if (isShared) return;
     if (window.catalogRevision !== revisionAtLoad) {
       await syncCatalog();
       return;
@@ -429,7 +452,7 @@
   importInput.addEventListener('change', async () => {
     const file = importInput.files && importInput.files[0];
     importInput.value = '';
-    if (!file) return;
+    if (!file || isShared) return;
 
     try {
       const parsed = parseImport(await file.text(), file.name);
@@ -559,6 +582,91 @@
     }
   });
 
+  shareButton.addEventListener('click', async () => {
+    if (!state.catalog) return;
+    const cards = state.catalog.cards.filter(card => !state.found[card.id]);
+    if (!cards.length) {
+      setMessage('There are no missing cards to share.', 'info');
+      return;
+    }
+    const sets = new Set(cards.map(card => card.set));
+    shareButton.disabled = true;
+    try {
+      const token = await catalogStorage.encodeShare(
+        { version: 1, updatedAt: Date.now(), source: state.catalog.source, cards },
+        { search: searchInput.value.trim(), rarities: selectedRarities, collapsed: [...collapsedSets].filter(set => sets.has(set)) }
+      );
+      const url = `${location.origin}${location.pathname}${SHARE_PREFIX}${token}`;
+      const done = `share link for ${cards.length.toLocaleString()} missing cards with your current filters. Anything changed from that link stays in the other person's browser.`;
+      try {
+        await navigator.clipboard.writeText(url);
+        setMessage(`Copied a ${done}`, 'success');
+      } catch (error) {
+        console.warn('Clipboard access unavailable; showing the share link instead.', error);
+        window.prompt('Copy this share link:', url);
+        setMessage(`Created a ${done}`, 'success');
+      }
+    } catch (error) {
+      console.error('Could not create a Collectr share link.', error);
+      setMessage('This browser could not create a share link.', 'error');
+    } finally {
+      shareButton.disabled = !state.catalog;
+    }
+  });
+
+  function showSharedError() {
+    emptyState.replaceChildren(
+      createElement('h1', '', 'This share link could not be opened'),
+      createElement('p', '', 'The link may be incomplete. Ask the person who shared it to copy a new one.')
+    );
+  }
+
+  async function loadShared() {
+    root.classList.add('collectr-shared');
+    document.title = 'Shared Collectr Missing Cards';
+    const subtitle = document.querySelector('.logo-text span');
+    if (subtitle) subtitle.textContent = 'Shared missing cards';
+    sharedBanner.hidden = false;
+    statsLabel.textContent = 'Loading shared list…';
+    emptyState.hidden = true;
+    try {
+      const shared = await catalogStorage.decodeShare(sharedToken);
+      if (!isCatalog(shared.catalog)) throw new Error('Invalid shared catalog.');
+      let found = {};
+      try {
+        found = cleanFound(JSON.parse(localStorage.getItem(sharedKey) || 'null'), shared.catalog.cards);
+      } catch (error) {
+        console.warn('Could not load saved marks for this shared list.', error);
+      }
+      state = { catalog: shared.catalog, found };
+      window.obtained = state.found;
+      const rarities = new Set(shared.catalog.cards.map(card => card.rarity));
+      const setNames = new Set(shared.catalog.cards.map(card => card.set));
+      searchInput.value = shared.filters.search;
+      search = shared.filters.search.trim().toLocaleLowerCase();
+      selectedRarities = new Set(shared.filters.rarities.filter(rarity => rarities.has(rarity)));
+      collapsedSets.clear();
+      for (const set of shared.filters.collapsed) if (setNames.has(set)) collapsedSets.add(set);
+      render();
+    } catch (error) {
+      console.error('Could not open the Collectr share link.', error);
+      showSharedError();
+      render();
+      statsLabel.textContent = 'Shared list unavailable.';
+    }
+  }
+
+  sharedResetButton.addEventListener('click', () => {
+    try {
+      localStorage.removeItem(sharedKey);
+    } catch (error) {
+      console.warn('Could not clear marks for this shared list.', error);
+    }
+    location.reload();
+  });
+
+  window.addEventListener('hashchange', () => location.reload());
+
   (function initializeTheme() {
     const toggle = document.querySelector('[data-theme-toggle]');
     const html = document.documentElement;
@@ -577,5 +685,6 @@
   } catch (error) {
     console.warn('Could not load compact-view preference.', error);
   }
-  render();
+  if (isShared) loadShared();
+  else render();
 })();
