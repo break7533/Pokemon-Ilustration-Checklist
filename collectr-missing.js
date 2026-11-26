@@ -413,6 +413,7 @@
     state.found = cleanFound(cloudData, state.catalog ? state.catalog.cards : []);
     saveState();
     render();
+    refreshFinds();
   };
 
   window.applyCloudCatalog = async function(cloudCatalog, revisionAtLoad) {
@@ -450,6 +451,7 @@
       window.catalogRevision++;
       window.stateRevision++;
       render();
+      refreshFinds();
     } else {
       await syncCatalog();
     }
@@ -497,6 +499,7 @@
       searchInput.value = '';
       collapsedSets.clear();
       render();
+      refreshFinds();
       const result = await syncCatalog();
       if (result && result.ok) {
         setMessage(`Imported ${parsed.cards.length.toLocaleString()} cards and synced the catalog to Firebase.`, 'success');
@@ -557,6 +560,7 @@
       return;
     }
     render();
+    refreshFinds();
     syncFound();
   });
 
@@ -770,11 +774,38 @@
     return `${days} ${days === 1 ? 'day' : 'days'} ago`;
   }
 
+  const openFinds = new Set();
+  const unselectedFinds = new Map();
+
+  function makeFindCard(card, selected) {
+    const tile = createElement('button', 'collectr-find-card' + (selected ? ' is-selected' : ''));
+    tile.type = 'button';
+    tile.dataset.id = card.id;
+    tile.setAttribute('aria-pressed', String(selected));
+    tile.title = `${card.set} · ${card.number} · ${card.name}`;
+    const art = createElement('span', 'collectr-find-art');
+    if (card.img) {
+      const image = createElement('img');
+      image.src = card.img;
+      image.alt = '';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      art.appendChild(image);
+    } else {
+      art.appendChild(createElement('span', 'collectr-placeholder', 'No image'));
+    }
+    art.appendChild(createElement('span', 'collectr-find-check', '✓'));
+    tile.append(art, createElement('span', 'collectr-number', card.number), createElement('span', 'collectr-find-name', card.name));
+    return tile;
+  }
+
   function renderFinds(finds) {
     if (!findsPanel) {
       findsPanel = createElement('div', 'collectr-finds');
       findsPanel.setAttribute('aria-label', 'Finds sent from your share links');
-      statusMessage.parentNode.insertBefore(findsPanel, statusMessage);
+      // Outside the sticky toolbar so a long review scrolls with the page instead of covering it.
+      const stats = document.querySelector('.collectr-stats');
+      stats.parentNode.insertBefore(findsPanel, stats);
     }
     findsPanel.replaceChildren();
     const cardsById = new Map((state.catalog ? state.catalog.cards : []).map(card => [card.id, card]));
@@ -782,50 +813,116 @@
       const known = find.cards.filter(id => cardsById.has(id));
       const fresh = known.filter(id => !state.found[id]);
       const who = find.name || 'Someone';
-      const item = createElement('div', 'collectr-find');
-      const summary = createElement('div', 'collectr-find-summary');
-      const parts = [`${who} found ${find.cards.length.toLocaleString()} ${find.cards.length === 1 ? 'card' : 'cards'}`];
-      if (fresh.length !== find.cards.length) {
-        const already = known.length - fresh.length;
-        const missing = find.cards.length - known.length;
-        const notes = [];
-        if (fresh.length) notes.push(`${fresh.length.toLocaleString()} new`);
-        if (already) notes.push(`${already.toLocaleString()} already marked`);
-        if (missing) notes.push(`${missing.toLocaleString()} not in your current list`);
-        parts.push(`(${notes.join(', ')})`);
-      }
-      const age = formatAge(find.updatedAt);
-      summary.appendChild(createElement('span', 'collectr-find-text', parts.join(' ') + (age ? ` · ${age}` : '')));
+      if (!unselectedFinds.has(find.id)) unselectedFinds.set(find.id, new Set());
+      const unselected = unselectedFinds.get(find.id);
+      const selectedCount = () => fresh.filter(id => !unselected.has(id)).length;
 
-      const list = createElement('ul', 'collectr-find-list');
-      list.hidden = true;
-      for (const id of fresh) {
-        const card = cardsById.get(id);
-        list.appendChild(createElement('li', '', `${card.set} · ${card.number} · ${card.name}`));
-      }
+      const item = createElement('section', 'collectr-find');
+      const header = createElement('div', 'collectr-find-header');
+      const title = createElement('div', 'collectr-find-title');
+      title.appendChild(createElement('strong', '', `${who} found ${find.cards.length.toLocaleString()} ${find.cards.length === 1 ? 'card' : 'cards'}`));
+      const notes = [];
+      const already = known.length - fresh.length;
+      const missing = find.cards.length - known.length;
+      if (fresh.length !== find.cards.length && fresh.length) notes.push(`${fresh.length.toLocaleString()} new`);
+      if (already) notes.push(`${already.toLocaleString()} already marked`);
+      if (missing) notes.push(`${missing.toLocaleString()} not in your current list`);
+      const age = formatAge(find.updatedAt);
+      if (age) notes.push(age);
+      if (notes.length) title.appendChild(createElement('span', 'collectr-find-meta', notes.join(' · ')));
+      header.appendChild(title);
+
+      const actions = createElement('div', 'collectr-find-actions');
+      const body = createElement('div', 'collectr-find-body');
+      body.hidden = !openFinds.has(find.id);
+      let accept = null;
       if (fresh.length) {
-        const review = createElement('button', 'collectr-clear-filters', 'Review');
+        const review = createElement('button', 'collectr-button', body.hidden ? 'Review' : 'Hide');
         review.type = 'button';
+        review.setAttribute('aria-expanded', String(!body.hidden));
         review.addEventListener('click', () => {
-          list.hidden = !list.hidden;
-          review.textContent = list.hidden ? 'Review' : 'Hide';
+          body.hidden = !body.hidden;
+          if (body.hidden) openFinds.delete(find.id);
+          else openFinds.add(find.id);
+          review.textContent = body.hidden ? 'Review' : 'Hide';
+          review.setAttribute('aria-expanded', String(!body.hidden));
         });
-        const accept = createElement('button', 'collectr-button', `Mark ${fresh.length.toLocaleString()} found`);
+        accept = createElement('button', 'collectr-button collectr-find-accept');
         accept.type = 'button';
-        accept.addEventListener('click', () => acceptFind(find, fresh, who));
-        summary.append(review, accept);
+        const updateAccept = () => {
+          const count = selectedCount();
+          accept.textContent = `Mark ${count.toLocaleString()} found`;
+          accept.disabled = count === 0;
+        };
+        updateAccept();
+        accept.addEventListener('click', () => acceptFind(find, fresh.filter(id => !unselected.has(id)), who));
+        actions.append(review, accept);
+
+        const tools = createElement('div', 'collectr-find-tools');
+        tools.appendChild(createElement('span', '', 'Tap a card to leave it out.'));
+        const all = createElement('button', 'collectr-clear-filters', 'Select all');
+        all.type = 'button';
+        const none = createElement('button', 'collectr-clear-filters', 'Select none');
+        none.type = 'button';
+        tools.append(all, none);
+        body.appendChild(tools);
+
+        const bySet = new Map();
+        for (const id of fresh) {
+          const card = cardsById.get(id);
+          if (!bySet.has(card.set)) bySet.set(card.set, []);
+          bySet.get(card.set).push(card);
+        }
+        for (const [set, cards] of bySet) {
+          const group = createElement('div', 'collectr-find-set');
+          const heading = createElement('div', 'collectr-find-set-name');
+          heading.append(createElement('strong', '', set), createElement('span', '', `${cards.length.toLocaleString()} ${cards.length === 1 ? 'card' : 'cards'}`));
+          const grid = createElement('div', 'collectr-find-grid');
+          for (const card of cards) grid.appendChild(makeFindCard(card, !unselected.has(card.id)));
+          group.append(heading, grid);
+          body.appendChild(group);
+        }
+        const setAll = selected => {
+          if (selected) unselected.clear();
+          else for (const id of fresh) unselected.add(id);
+          for (const tile of body.querySelectorAll('.collectr-find-card')) {
+            tile.classList.toggle('is-selected', selected);
+            tile.setAttribute('aria-pressed', String(selected));
+          }
+          updateAccept();
+        };
+        all.addEventListener('click', () => setAll(true));
+        none.addEventListener('click', () => setAll(false));
+        body.addEventListener('click', event => {
+          const tile = event.target.closest('.collectr-find-card');
+          if (!tile) return;
+          const id = tile.dataset.id;
+          if (unselected.has(id)) unselected.delete(id);
+          else unselected.add(id);
+          const selected = !unselected.has(id);
+          tile.classList.toggle('is-selected', selected);
+          tile.setAttribute('aria-pressed', String(selected));
+          updateAccept();
+        });
+      } else {
+        title.appendChild(createElement('span', 'collectr-find-meta', 'Nothing new to mark.'));
       }
       const dismiss = createElement('button', 'collectr-clear-filters', 'Dismiss');
       dismiss.type = 'button';
       dismiss.addEventListener('click', () => removeFind(find, `Dismissed the finds from ${who}.`));
-      summary.appendChild(dismiss);
-      item.append(summary, list);
+      actions.appendChild(dismiss);
+      header.appendChild(actions);
+      item.append(header, body);
       findsPanel.appendChild(item);
     }
     findsPanel.hidden = finds.length === 0;
   }
 
   let currentFinds = [];
+
+  function refreshFinds() {
+    if (findsPanel) renderFinds(currentFinds);
+  }
 
   async function removeFind(find, message) {
     const result = await window.collectrShares.deleteFind(find.id);
@@ -834,12 +931,21 @@
       return;
     }
     currentFinds = currentFinds.filter(item => item.id !== find.id);
+    openFinds.delete(find.id);
+    unselectedFinds.delete(find.id);
     renderFinds(currentFinds);
     if (message) setMessage(message, 'success');
   }
 
   async function acceptFind(find, ids, who) {
-    const added = ids.filter(id => !state.found[id]);
+    // Re-check against the current list in case an import or sync changed it since the panel was drawn.
+    const catalogIds = new Set(state.catalog ? state.catalog.cards.map(card => card.id) : []);
+    const added = ids.filter(id => catalogIds.has(id) && !state.found[id]);
+    if (!added.length) {
+      refreshFinds();
+      setMessage('None of the selected cards are still missing in your list.', 'info');
+      return;
+    }
     for (const id of added) state.found[id] = true;
     window.stateRevision++;
     if (!saveState()) {
