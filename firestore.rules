@@ -21,5 +21,26 @@ service cloud.firestore {
         && request.resource.data.payload.size() < 900000;
       allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
     }
+
+    // Cards a recipient found on a share link. Anyone with the link can send or replace
+    // their own report; only the share owner can read or delete reports.
+    match /shareFinds/{findId} {
+      function validFind() {
+        let data = request.resource.data;
+        let sharePath = /databases/$(database)/documents/shares/$(data.shareId);
+        return findId.size() == 20
+          && data.keys().hasOnly(['shareId', 'ownerUid', 'name', 'cards', 'updatedAt'])
+          && data.keys().hasAll(['shareId', 'ownerUid', 'name', 'cards', 'updatedAt'])
+          && data.shareId is string && data.shareId.size() == 20
+          && exists(sharePath)
+          && data.ownerUid == get(sharePath).data.ownerUid
+          && data.name is string && data.name.size() <= 40
+          && data.cards is list && data.cards.size() > 0 && data.cards.size() <= 25000
+          && data.updatedAt == request.time;
+      }
+      allow create: if validFind();
+      allow update: if validFind() && request.resource.data.shareId == resource.data.shareId;
+      allow get, list, delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
+    }
   }
 }

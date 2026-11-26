@@ -29,6 +29,9 @@
   const sharedId = location.hash.startsWith(SHORT_SHARE_PREFIX) ? location.hash.slice(SHORT_SHARE_PREFIX.length) : '';
   const isShared = Boolean(sharedToken || sharedId);
   const sharedKey = isShared ? `collectr-missing_shared_${hashString(sharedId || sharedToken)}` : '';
+  const FINDER_NAME_KEY = 'collectr-missing_finder_name';
+  const MAX_FINDER_NAME = 40;
+  let sharedOwnerUid = '';
 
   // firebase.js skips cloud load/sync for 'index', so a shared view never touches anyone's account.
   window.PAGE_ID = isShared ? 'index' : PAGE_ID;
@@ -603,7 +606,7 @@
       const saved = window.collectrShares ? await window.collectrShares.create(token) : { ok: false, reason: 'cloud-error' };
       const url = saved.ok ? `${base}${SHORT_SHARE_PREFIX}${saved.id}` : `${base}${SHARE_PREFIX}${token}`;
       const fallback = saved.ok ? ''
-        : saved.reason === 'not-signed-in' ? ' Sign in to get a short link instead of this long one.'
+        : saved.reason === 'not-signed-in' ? (isShared ? '' : ' Sign in to get a short link instead of this long one.')
         : ' A short link could not be saved, so this is the long version.';
       const done = `share link for ${cards.length.toLocaleString()} missing cards with your current filters. Anything changed from that link stays in the other person's browser.${fallback}`;
       try {
@@ -649,6 +652,7 @@
     if (!sharedId) return sharedToken;
     const result = await (await waitForShares()).load(sharedId);
     if (!result.ok) throw Object.assign(new Error('Shared list unavailable.'), { reason: result.reason });
+    sharedOwnerUid = typeof result.ownerUid === 'string' ? result.ownerUid : '';
     return result.payload;
   }
 
@@ -679,6 +683,7 @@
       collapsedSets.clear();
       for (const set of shared.filters.collapsed) if (setNames.has(set)) collapsedSets.add(set);
       render();
+      if (sharedId && sharedOwnerUid) addSendFindsButton();
     } catch (error) {
       console.error('Could not open the Collectr share link.', error);
       showSharedError(error.reason);
@@ -686,6 +691,182 @@
       statsLabel.textContent = 'Shared list unavailable.';
     }
   }
+
+  function storageGet(key) {
+    try {
+      return localStorage.getItem(key) || '';
+    } catch {
+      return '';
+    }
+  }
+
+  function storageSet(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (error) {
+      console.warn('Could not save to browser storage.', error);
+    }
+  }
+
+  function randomId() {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    return Array.from(crypto.getRandomValues(new Uint8Array(20)), byte => alphabet[byte % alphabet.length]).join('');
+  }
+
+  // Built in JS rather than HTML so a stale cached page with a newer script still works.
+  function addSendFindsButton() {
+    if (!sharedBanner || document.getElementById('collectrSendFinds')) return;
+    const button = createElement('button', 'collectr-button collectr-send-finds', 'Send my finds to owner');
+    button.id = 'collectrSendFinds';
+    button.type = 'button';
+    button.title = 'Send the cards you marked found so the owner can review and add them to their tracker';
+    sharedBanner.insertBefore(button, sharedResetButton);
+    button.addEventListener('click', () => sendFinds(button));
+  }
+
+  async function sendFinds(button) {
+    const cards = Object.keys(state.found);
+    if (!cards.length) {
+      setMessage('Mark the cards you found first, then send them to the owner.', 'info');
+      return;
+    }
+    const answer = window.prompt('Your name (optional), so the owner knows who found these:', storageGet(FINDER_NAME_KEY));
+    if (answer === null) return;
+    const name = normalizeText(answer).slice(0, MAX_FINDER_NAME);
+    storageSet(FINDER_NAME_KEY, name);
+    const findKey = `${sharedKey}_find`;
+    let findId = storageGet(findKey);
+    if (!/^[A-Za-z0-9]{20}$/.test(findId)) {
+      findId = randomId();
+      storageSet(findKey, findId);
+    }
+    button.disabled = true;
+    try {
+      const shares = await waitForShares();
+      const result = await shares.sendFinds({ findId, shareId: sharedId, ownerUid: sharedOwnerUid, name, cards });
+      if (result.ok) {
+        setMessage(`Sent ${cards.length.toLocaleString()} found ${cards.length === 1 ? 'card' : 'cards'} to the owner. Sending again replaces this update.`, 'success');
+      } else {
+        setMessage('Could not send your finds. Check your connection or disable ad blockers for this site, then try again.', 'error');
+      }
+    } catch (error) {
+      console.error('Could not send Collectr finds.', error);
+      setMessage('Could not send your finds. Check your connection or disable ad blockers for this site, then try again.', 'error');
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  let findsPanel = null;
+
+  function formatAge(ms) {
+    if (!ms) return '';
+    const minutes = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} h ago`;
+    const days = Math.round(hours / 24);
+    return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  }
+
+  function renderFinds(finds) {
+    if (!findsPanel) {
+      findsPanel = createElement('div', 'collectr-finds');
+      findsPanel.setAttribute('aria-label', 'Finds sent from your share links');
+      statusMessage.parentNode.insertBefore(findsPanel, statusMessage);
+    }
+    findsPanel.replaceChildren();
+    const cardsById = new Map((state.catalog ? state.catalog.cards : []).map(card => [card.id, card]));
+    for (const find of finds) {
+      const known = find.cards.filter(id => cardsById.has(id));
+      const fresh = known.filter(id => !state.found[id]);
+      const who = find.name || 'Someone';
+      const item = createElement('div', 'collectr-find');
+      const summary = createElement('div', 'collectr-find-summary');
+      const parts = [`${who} found ${find.cards.length.toLocaleString()} ${find.cards.length === 1 ? 'card' : 'cards'}`];
+      if (fresh.length !== find.cards.length) {
+        const already = known.length - fresh.length;
+        const missing = find.cards.length - known.length;
+        const notes = [];
+        if (fresh.length) notes.push(`${fresh.length.toLocaleString()} new`);
+        if (already) notes.push(`${already.toLocaleString()} already marked`);
+        if (missing) notes.push(`${missing.toLocaleString()} not in your current list`);
+        parts.push(`(${notes.join(', ')})`);
+      }
+      const age = formatAge(find.updatedAt);
+      summary.appendChild(createElement('span', 'collectr-find-text', parts.join(' ') + (age ? ` · ${age}` : '')));
+
+      const list = createElement('ul', 'collectr-find-list');
+      list.hidden = true;
+      for (const id of fresh) {
+        const card = cardsById.get(id);
+        list.appendChild(createElement('li', '', `${card.set} · ${card.number} · ${card.name}`));
+      }
+      if (fresh.length) {
+        const review = createElement('button', 'collectr-clear-filters', 'Review');
+        review.type = 'button';
+        review.addEventListener('click', () => {
+          list.hidden = !list.hidden;
+          review.textContent = list.hidden ? 'Review' : 'Hide';
+        });
+        const accept = createElement('button', 'collectr-button', `Mark ${fresh.length.toLocaleString()} found`);
+        accept.type = 'button';
+        accept.addEventListener('click', () => acceptFind(find, fresh, who));
+        summary.append(review, accept);
+      }
+      const dismiss = createElement('button', 'collectr-clear-filters', 'Dismiss');
+      dismiss.type = 'button';
+      dismiss.addEventListener('click', () => removeFind(find, `Dismissed the finds from ${who}.`));
+      summary.appendChild(dismiss);
+      item.append(summary, list);
+      findsPanel.appendChild(item);
+    }
+    findsPanel.hidden = finds.length === 0;
+  }
+
+  let currentFinds = [];
+
+  async function removeFind(find, message) {
+    const result = await window.collectrShares.deleteFind(find.id);
+    if (!result.ok) {
+      setMessage('Could not remove this update from Firebase. Try again later.', 'error');
+      return;
+    }
+    currentFinds = currentFinds.filter(item => item.id !== find.id);
+    renderFinds(currentFinds);
+    if (message) setMessage(message, 'success');
+  }
+
+  async function acceptFind(find, ids, who) {
+    const added = ids.filter(id => !state.found[id]);
+    for (const id of added) state.found[id] = true;
+    window.stateRevision++;
+    if (!saveState()) {
+      for (const id of added) delete state.found[id];
+      window.stateRevision--;
+      window.obtained = state.found;
+      setMessage('Could not save these found marks in browser storage.', 'error');
+      return;
+    }
+    render();
+    syncFound();
+    await removeFind(find, `Marked ${added.length.toLocaleString()} ${added.length === 1 ? 'card' : 'cards'} found from ${who}.`);
+  }
+
+  async function loadFinds() {
+    if (isShared || !state.catalog || !window.collectrShares || typeof window.collectrShares.listFinds !== 'function') return;
+    const result = await window.collectrShares.listFinds();
+    if (!result.ok) {
+      currentFinds = [];
+      if (findsPanel) renderFinds(currentFinds);
+      return;
+    }
+    currentFinds = result.finds.sort((a, b) => b.updatedAt - a.updatedAt);
+    renderFinds(currentFinds);
+  }
+
+  window.addEventListener('collectr-auth-ready', loadFinds);
 
   sharedResetButton.addEventListener('click', () => {
     try {

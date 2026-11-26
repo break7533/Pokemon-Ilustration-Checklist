@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "__FIREBASE_API_KEY__",
@@ -125,16 +125,59 @@ window.collectrShares = {
     try {
       const snap = await getDoc(doc(db, 'shares', id));
       if (!snap.exists() || typeof snap.data().payload !== 'string') return { ok: false, reason: 'not-found' };
-      return { ok: true, payload: snap.data().payload };
+      return { ok: true, payload: snap.data().payload, ownerUid: snap.data().ownerUid };
     } catch (e) {
       console.warn('Firestore share read failed.', e.message);
       return { ok: false, reason: 'cloud-error' };
     }
+  },
+  // Recipients report cards they found; only the share owner can read or delete these reports.
+  async sendFinds({ findId, shareId, ownerUid, name, cards }) {
+    try {
+      await setDoc(doc(db, 'shareFinds', findId), { shareId, ownerUid, name, cards, updatedAt: serverTimestamp() });
+      return { ok: true };
+    } catch (e) {
+      console.warn('Firestore finds write failed.', e.message);
+      return { ok: false, reason: 'cloud-error' };
+    }
+  },
+  async listFinds() {
+    if (!currentUser) return { ok: false, reason: 'not-signed-in' };
+    try {
+      const snap = await getDocs(query(collection(db, 'shareFinds'), where('ownerUid', '==', currentUser.uid)));
+      const finds = snap.docs.map(item => {
+        const data = item.data();
+        return {
+          id: item.id,
+          shareId: data.shareId,
+          name: typeof data.name === 'string' ? data.name : '',
+          cards: Array.isArray(data.cards) ? data.cards.filter(id => typeof id === 'string') : [],
+          updatedAt: data.updatedAt && typeof data.updatedAt.toMillis === 'function' ? data.updatedAt.toMillis() : 0
+        };
+      });
+      return { ok: true, finds };
+    } catch (e) {
+      console.warn('Firestore finds read failed.', e.message);
+      return { ok: false, reason: 'cloud-error' };
+    }
+  },
+  async deleteFind(id) {
+    if (!currentUser) return { ok: false, reason: 'not-signed-in' };
+    try {
+      await deleteDoc(doc(db, 'shareFinds', id));
+      return { ok: true };
+    } catch (e) {
+      console.warn('Firestore finds delete failed.', e.message);
+      return { ok: false, reason: 'cloud-error' };
+    }
   }
 };
-if (typeof window.dispatchEvent === 'function' && typeof Event === 'function') {
-  window.dispatchEvent(new Event('collectr-shares-ready'));
+function notify(name) {
+  if (typeof window.dispatchEvent === 'function' && typeof Event === 'function') {
+    window.dispatchEvent(new Event(name));
+  }
 }
+notify('collectr-shares-ready');
 
 function renderAuthButton(user) {
   const btn = document.getElementById('authBtn');
@@ -186,6 +229,7 @@ onAuthStateChanged(auth, async (user) => {
       window.syncObtainedToCloud(window.PAGE_ID, window.obtained || {});
     }
   }
+  notify('collectr-auth-ready');
 });
 
 document.addEventListener('click', (e) => {
