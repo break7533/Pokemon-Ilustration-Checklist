@@ -27,8 +27,7 @@
   let selectedRarities = new Set();
   let visibleCards = [];
   let visibleUnfoundCards = [];
-  let openSets = new Set();
-  let hasRendered = false;
+  const collapsedSets = new Set();
   window.obtained = state.found;
   window.collectrCatalogUpdatedAt = state.catalog ? state.catalog.updatedAt : 0;
 
@@ -270,11 +269,6 @@
     return article;
   }
 
-  function captureOpenSets() {
-    if (!hasRendered) return;
-    openSets = new Set([...setsContainer.querySelectorAll('.collectr-set[open]')].map(section => section.dataset.set));
-  }
-
   function renderRarities(cards) {
     const rarities = [...new Set(cards.map(card => card.rarity))];
     rarityContainer.replaceChildren();
@@ -290,7 +284,6 @@
       input.addEventListener('change', () => {
         if (input.checked) selectedRarities.add(rarity);
         else selectedRarities.delete(rarity);
-        captureOpenSets();
         render();
       });
       label.append(input, document.createTextNode(rarity));
@@ -300,7 +293,6 @@
     clear.type = 'button';
     clear.addEventListener('click', () => {
       selectedRarities.clear();
-      captureOpenSets();
       render();
     });
     rarityContainer.appendChild(clear);
@@ -327,7 +319,11 @@
       if (!shownCards.length) continue;
       const section = createElement('details', 'collectr-set');
       section.dataset.set = set;
-      section.open = !hasRendered || openSets.has(set);
+      section.open = !collapsedSets.has(set);
+      section.addEventListener('toggle', () => {
+        if (section.open) collapsedSets.delete(set);
+        else collapsedSets.add(set);
+      });
       const summary = createElement('summary', 'collectr-set-summary');
       summary.appendChild(createElement('strong', '', set));
       summary.appendChild(createElement('span', 'collectr-set-count', `${shownCards.length} shown`));
@@ -354,7 +350,6 @@
     if (cards.length && visibleCards.length === 0) {
       setsContainer.appendChild(createElement('p', 'collectr-no-results', 'No cards match those filters.'));
     }
-    hasRendered = true;
   }
 
   function syncFound() {
@@ -461,8 +456,7 @@
       selectedRarities.clear();
       search = '';
       searchInput.value = '';
-      openSets.clear();
-      hasRendered = false;
+      collapsedSets.clear();
       render();
       const result = await syncCatalog();
       if (result && result.ok) {
@@ -482,7 +476,6 @@
 
   searchInput.addEventListener('input', () => {
     search = searchInput.value.trim().toLocaleLowerCase();
-    captureOpenSets();
     render();
   });
 
@@ -501,7 +494,6 @@
     const article = button.closest('.collectr-tile');
     if (!article) return;
     const id = article.dataset.id;
-    captureOpenSets();
     const wasFound = Boolean(state.found[id]);
     if (state.found[id]) delete state.found[id];
     else state.found[id] = true;
@@ -524,11 +516,12 @@
   }
 
   exportButton.addEventListener('click', async () => {
+    const expandedCards = visibleUnfoundCards.filter(card => !collapsedSets.has(card.set));
     const csv = [
       'set,card_number,name',
-      ...visibleUnfoundCards.map(card => [card.set, card.number, card.name].map(quoteCsv).join(','))
+      ...expandedCards.map(card => [card.set, card.number, card.name].map(quoteCsv).join(','))
     ].join('\r\n');
-    const count = visibleUnfoundCards.length;
+    const count = expandedCards.length;
     try {
       await navigator.clipboard.writeText(csv);
       setMessage(`Copied ${count.toLocaleString()} visible unfound cards as CSV.`, 'success');
