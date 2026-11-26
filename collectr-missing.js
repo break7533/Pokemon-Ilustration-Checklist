@@ -9,6 +9,7 @@
   const compactInput = document.getElementById('collectrCompact');
   const importInput = document.getElementById('collectrImport');
   const exportButton = document.getElementById('collectrExport');
+  const collapseAllButton = document.getElementById('collectrCollapseAll');
   const rarityContainer = document.getElementById('collectrRarities');
   const setsContainer = document.getElementById('collectrSets');
   const emptyState = document.getElementById('collectrEmpty');
@@ -298,6 +299,13 @@
     rarityContainer.appendChild(clear);
   }
 
+  function updateCollapseAllButton() {
+    const sections = [...setsContainer.querySelectorAll('.collectr-set')];
+    const anyOpen = sections.some(section => section.open);
+    collapseAllButton.disabled = sections.length === 0;
+    collapseAllButton.textContent = anyOpen || !sections.length ? 'Collapse all' : 'Expand all';
+  }
+
   function render() {
     const cards = state.catalog ? state.catalog.cards : [];
     emptyState.hidden = cards.length > 0;
@@ -323,6 +331,7 @@
       section.addEventListener('toggle', () => {
         if (section.open) collapsedSets.delete(set);
         else collapsedSets.add(set);
+        updateCollapseAllButton();
       });
       const summary = createElement('summary', 'collectr-set-summary');
       summary.appendChild(createElement('strong', '', set));
@@ -350,6 +359,7 @@
     if (cards.length && visibleCards.length === 0) {
       setsContainer.appendChild(createElement('p', 'collectr-no-results', 'No cards match those filters.'));
     }
+    updateCollapseAllButton();
   }
 
   function syncFound() {
@@ -476,6 +486,16 @@
 
   searchInput.addEventListener('input', () => {
     search = searchInput.value.trim().toLocaleLowerCase();
+    render();
+  });
+
+  collapseAllButton.addEventListener('click', () => {
+    const anyOpen = [...setsContainer.querySelectorAll('.collectr-set')].some(section => section.open);
+    collapsedSets.clear();
+    // Collapse every catalog set, not just shown ones, so sets revealed by a later search start collapsed.
+    if (anyOpen && state.catalog) {
+      for (const card of state.catalog.cards) collapsedSets.add(card.set);
+    }
     render();
   });
 
